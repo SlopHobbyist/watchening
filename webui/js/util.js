@@ -9,6 +9,18 @@
 
   U.$ = (id) => document.getElementById(id);
   U.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  /** Menu keys: arrows and WASD move, Enter is OK, Esc / Backspace go back. */
+  U.nav = (e) => {
+    switch (e.key) {
+      case "ArrowUp": case "w": case "W": return "up";
+      case "ArrowDown": case "s": case "S": return "down";
+      case "ArrowLeft": case "a": case "A": return "left";
+      case "ArrowRight": case "d": case "D": return "right";
+      case "Enter": return "ok";
+      case "Escape": case "Backspace": return "back";
+    }
+    return null;
+  };
   U.uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   U.esc = (s) =>
     String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);

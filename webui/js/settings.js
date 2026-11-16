@@ -1,65 +1,74 @@
 /*
- * Settings screen, laid out like the iGuide's list screens ("Scheduled
- * Recordings", "Listings By Channel"): the guide's top half, a title bar with
- * a  < Page >  selector, and a list of rows.
+ * Settings: a full-screen menu in the guide's style. A category column on the
+ * left (like the guide's channel column) beside that category's rows, an
+ * info panel describing the selection, and key hints.
  *
  *   Playlists  add by URL / upload file, refresh, turn off, rename, remove,
  *              guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
  *   Options    subtitle defaults, CORS proxy, erase everything
+ *
+ * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
+ *       Left (A) / Esc / Backspace back out · Esc in the categories (or F1) closes
  */
 (function () {
   "use strict";
   const { $ } = U;
-  const PAGES = ["Playlists", "Channels", "Options"];
-  const VIS = 6;          // visible rows
+  const PAGES = [
+    { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
+    { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
+    { name: "Options", desc: "Subtitles, the playlist proxy, the remote control keys, and erasing everything." },
+  ];
+  const VIS = 7;          // visible rows
   const PITCH = 44;       // row height + gap
-  const M = { page: 0, sel: [0, 0, 0], top: [0, 0, 0], moving: null, entry: "", entryTimer: 0 };
-  const rowsEl = $("m-rows");
+  // col: 0 = category column has focus, 1 = the rows
+  const M = { page: 0, col: 0, sel: [0, 0, 0], top: [0, 0, 0], moving: null, entry: "", entryTimer: 0 };
+  const rowsEl = $("m-rows"), catsEl = $("m-cats");
 
   // -------------------------------------------------------------------- rows
   function playlistRows() {
     const cfg = Store.cfg;
     const out = [
       {
-        label: "Add", text: "Add Playlist from URL",
+        text: "Add Playlist from URL",
         info: { title: "Add Playlist from URL", desc: "Enter the web address of an M3U or M3U8 playlist. Web playlists are downloaded again when they are more than an hour old." },
         act: addUrlDialog,
       },
       {
-        label: "Upload", text: "Upload Playlist File",
+        text: "Upload Playlist File",
         info: { title: "Upload Playlist File", desc: "Choose .m3u or .m3u8 files on this computer. You can also drag playlist files onto this window." },
         act: () => $("file-m3u").click(),
       },
     ];
     for (const pl of cfg.playlists) {
       out.push({
-        label: pl.enabled ? `${pl.count || 0} ch` : "Off",
         text: pl.name,
-        tag: pl.error ? "Problem" : pl.type === "url" ? "Web" : "File",
+        tag: pl.error ? "Problem" : !pl.enabled ? "Off" : `${pl.count || 0} ch · ${pl.type === "url" ? "Web" : "File"}`,
         cls: (pl.enabled ? "" : "off") + (pl.error ? " warn" : ""),
         info: {
           title: pl.name,
           chan: pl.enabled ? `${pl.count || 0} channels` : "Turned off",
-          time: pl.type === "url" ? (pl.updated ? "Updated " + U.fmtDate(pl.updated) : "Not downloaded") : "Uploaded file",
-          desc: (pl.error ? `Problem: ${pl.error}. ` : "") + pl.url,
+          desc: [
+            pl.type === "url" ? (pl.updated ? "Updated " + U.fmtDate(pl.updated) : "Not downloaded") : "Uploaded file",
+            pl.error ? `Problem: ${pl.error}` : "",
+            pl.url,
+          ].filter(Boolean).join(". "),
         },
         act: () => playlistDialog(pl),
       });
     }
     const srcs = App.epgSources();
     out.push({
-      label: "Guide", text: "Guide Data (XMLTV)", tag: App.epgBusy ? "Loading" : cfg.prefs.epgUrl ? "Custom" : "Auto",
+      text: "Guide Data (XMLTV)", tag: App.epgBusy ? "Loading" : cfg.prefs.epgUrl ? "Custom" : "Auto",
       info: {
         title: "Guide Data (XMLTV)",
-        chan: cfg.prefs.epgUrl ? "Custom" : "Automatic",
-        time: srcs.length ? `${srcs.length} source${srcs.length > 1 ? "s" : ""}` : "No source",
-        desc: App.epgStatus,
+        chan: srcs.length ? `${srcs.length} source${srcs.length > 1 ? "s" : ""}` : "No source",
+        desc: (cfg.prefs.epgUrl ? "Custom address. " : "From your playlists. ") + App.epgStatus,
       },
       act: epgDialog,
     });
     out.push({
-      label: "Refresh", text: "Refresh Playlists & Guide Data",
+      text: "Refresh Playlists & Guide Data",
       info: { title: "Refresh", desc: "Download every web playlist and the guide data again now." },
       act: refreshAll,
     });
@@ -68,25 +77,24 @@
 
   function channelRows() {
     const out = [{
-      label: "Reset", text: "Reset Channel Order",
+      text: "Reset Channel Order",
       info: { title: "Reset Channel Order", desc: "Put every channel back in the order its playlist lists it. Hidden channels stay hidden." },
       act: resetOrderDialog,
     }];
     for (const c of App.all) {
       out.push({
-        label: String(c.n), text: c.name, tag: c.hidden ? "Hidden" : c.group, key: c.key,
+        num: String(c.n), text: c.name, tag: c.hidden ? "Hidden" : c.group, key: c.key,
         cls: (c.hidden ? "off" : "") + (M.moving === c.key ? " moving" : ""),
         info: {
           title: c.name,
           chan: `${c.n} ${c.call}`,
-          time: c.group || "",
-          desc: (c.hidden ? "Hidden from the guide. " : "") + `From ${c.plName}. OK for options, H to hide or show.`,
+          desc: (c.group ? c.group + ". " : "") + (c.hidden ? "Hidden from the guide. " : "") + `From ${c.plName}. OK for options, H to hide or show.`,
         },
         act: () => channelDialog(c),
       });
     }
     if (!App.all.length) {
-      out.push({ label: "", text: "No channels yet: add a playlist first", info: { title: "No Channels" }, act: () => go(0) });
+      out.push({ text: "No channels yet: add a playlist first", info: { title: "No Channels" }, act: () => go(0) });
     }
     return out;
   }
@@ -95,27 +103,27 @@
     const p = Store.cfg.prefs;
     return [
       {
-        label: "CC", text: "Subtitles When Available", tag: p.ccDefault ? "On" : "Off",
+        text: "Subtitles When Available", tag: p.ccDefault ? "On" : "Off",
         info: { title: "Subtitles When Available", desc: "Turn subtitles on automatically when a channel has them. Press C while watching to switch them on or off." },
         act: () => { App.setPrefs({ ccDefault: !p.ccDefault }); render(); },
       },
       {
-        label: "CC", text: "Subtitle Size", tag: ["Small", "Medium", "Large"][p.ccSize] || "Medium",
-        info: { title: "Subtitle Size", desc: "Size of subtitle text on the picture." },
+        text: "Subtitle Size", tag: ["Small", "Medium", "Large"][p.ccSize] || "Medium",
+        info: { title: "Subtitle Size", desc: "Size of subtitle text on the picture. Also in Subtitle Options (Shift+C) while watching." },
         act: () => { App.setPrefs({ ccSize: ((p.ccSize | 0) + 1) % 3 }); render(); },
       },
       {
-        label: "Proxy", text: "CORS Proxy for Playlists", tag: p.proxy ? "On" : "None",
+        text: "CORS Proxy for Playlists", tag: p.proxy ? "On" : "None",
         info: { title: "CORS Proxy", desc: "Some playlist servers block web pages from downloading them. A CORS proxy can fetch them for you. Not used for video." },
         act: proxyDialog,
       },
       {
-        label: "Help", text: "Remote Control Keys",
-        info: { title: "Remote Control Keys", desc: "Keyboard shortcuts for the guide and the player." },
+        text: "Remote Control Keys",
+        info: { title: "Remote Control Keys", desc: "Keyboard shortcuts for the guide, the menus and the player." },
         act: helpDialog,
       },
       {
-        label: "Erase", text: "Erase All Settings & Playlists",
+        text: "Erase All Settings & Playlists",
         info: { title: "Erase Everything", desc: "Remove every playlist, the channel order and all options from this browser." },
         act: () => Dialog.confirm("Erase Everything", "Remove all playlists, channel order and options?", "Erase", async () => {
           await Store.reset();
@@ -125,7 +133,8 @@
     ];
   }
 
-  const rows = () => (M.page === 0 ? playlistRows() : M.page === 1 ? channelRows() : optionRows());
+  const rowsFor = (page) => (page === 0 ? playlistRows() : page === 1 ? channelRows() : optionRows());
+  const rows = () => rowsFor(M.page);
 
   // ------------------------------------------------------------------ render
   function div(cls, text) {
@@ -133,6 +142,21 @@
     d.className = cls;
     if (text != null) d.textContent = text;
     return d;
+  }
+
+  function showInfo({ title = "", chan = "", desc = "" }) {
+    const chanEl = $("mi-chan"), titleEl = $("mi-title");
+    U.fitText(chanEl, chan, true);
+    titleEl.style.maxWidth = Math.max(200, 800 - 56 - 24 - chanEl.offsetWidth - 20) + "px";
+    U.fitText(titleEl, title, true);
+    U.fitText($("mi-desc"), desc, false);
+  }
+
+  function pageInfo(i) {
+    const cfg = Store.cfg;
+    const chan = i === 0 ? `${cfg.playlists.length} playlist${cfg.playlists.length === 1 ? "" : "s"}`
+      : i === 1 ? `${App.all.length} channel${App.all.length === 1 ? "" : "s"}` : "";
+    return { title: PAGES[i].name, chan, desc: PAGES[i].desc };
   }
 
   function render() {
@@ -143,24 +167,46 @@
     if (sel < top) top = sel;
     if (sel >= top + VIS) top = sel - VIS + 1;
     top = M.top[M.page] = U.clamp(top, 0, Math.max(0, list.length - VIS));
+    const inRows = M.col === 1;
 
-    $("m-page").textContent = PAGES[M.page];
+    // categories
+    const cats = document.createDocumentFragment();
+    PAGES.forEach((pg, i) => {
+      const c = div("m-cat" + (i === M.page ? (inRows ? " cur" : " sel") : ""), pg.name);
+      c.style.top = i * PITCH + 2 + "px";
+      c.addEventListener("click", () => {
+        M.moving = null;
+        if (M.page === i && !inRows) M.col = 1;
+        else { M.page = i; M.col = 0; }
+        render();
+      });
+      cats.appendChild(c);
+    });
+    catsEl.replaceChildren(cats);
+
+    // rows, then empty listings to fill the screen
     const frag = document.createDocumentFragment();
     const toFit = [];
-    for (let i = top; i < Math.min(list.length, top + VIS); i++) {
+    for (let k = 0; k < VIS; k++) {
+      const i = top + k;
       const r = list[i];
-      const row = div("m-row" + (i === sel ? " sel" : "") + (r.cls ? " " + r.cls : ""));
-      row.style.top = (i - top) * PITCH + "px";
+      if (!r) {
+        const blank = div("m-row blank");
+        blank.style.top = k * PITCH + "px";
+        frag.appendChild(blank);
+        continue;
+      }
+      const row = div("m-row" + (inRows && i === sel ? " sel" : "") + (r.cls ? " " + r.cls : ""));
+      row.style.top = k * PITCH + "px";
+      if (M.page === 1) row.appendChild(div("m-num", r.num || ""));
       const text = div("m-text");
-      const cell = div("m-cell");
-      cell.appendChild(text);
-      if (r.tag) cell.appendChild(div("m-tag", r.tag));
-      row.append(div("m-label", r.label), cell);
+      row.appendChild(text);
+      if (r.tag) row.appendChild(div("m-tag", r.tag));
       if (M.moving && r.key === M.moving) row.appendChild(div("m-updown", "▲▼"));
       row.addEventListener("click", () => {
         if (M.moving) return drop();
-        if (M.sel[M.page] === i) activate();
-        else { M.sel[M.page] = i; render(); }
+        if (M.col === 1 && M.sel[M.page] === i) activate();
+        else { M.col = 1; M.sel[M.page] = i; render(); }
       });
       frag.appendChild(row);
       toFit.push([text, r.text]);
@@ -168,14 +214,17 @@
     rowsEl.replaceChildren(frag);
     for (const [el, t] of toFit) U.fitText(el, t, true);
 
+    $("m-title").textContent = PAGES[M.page].name;
+    if (!M.entry) $("m-pos").textContent = inRows && list.length > VIS ? `${sel + 1} of ${list.length}` : "";
     const cur = list[sel];
-    App.showInfo(cur.info || { title: cur.text });
-    $("m-pos").textContent = list.length > VIS ? `${sel + 1} of ${list.length}` : "";
+    showInfo(inRows ? cur.info || { title: cur.text } : pageInfo(M.page));
     $("m-hint").textContent = M.moving
       ? "▲▼ Move Channel · OK Done"
-      : M.page === 1
-        ? "▲▼ Select · OK Options · H Hide · ◀▶ Page · Esc Guide"
-        : "▲▼ Select · OK Choose · ◀▶ Page · Esc Guide";
+      : !inRows
+        ? "▲▼ Select · OK Open · Esc Close Settings"
+        : M.page === 1
+          ? "▲▼ Select · OK Options · H Hide · Esc Back"
+          : "▲▼ Select · OK Choose · Esc Back";
   }
 
   // ------------------------------------------------------------- navigation
@@ -186,7 +235,11 @@
   }
   function go(page) {
     M.moving = null;
-    M.page = (page + PAGES.length) % PAGES.length;
+    M.page = U.clamp(page, 0, PAGES.length - 1);
+    render();
+  }
+  function focusRows(on) {
+    M.col = on ? 1 : 0;
     render();
   }
   function activate() {
@@ -195,7 +248,7 @@
   }
   function close() {
     M.moving = null;
-    App.openGuide();
+    App.closeMenu();
   }
   function channelAt(sel) {
     return M.page === 1 ? App.all[sel - 1] || null : null;
@@ -287,6 +340,7 @@
     App.osd(pls.length === 1 ? `Added ${pls[0].name}: ${total} channels` : `Added ${pls.length} playlists: ${total} channels`, 3500);
     if (!Player.ch && App.channels.length) App.tuneKey(App.channels[0].key);
     if (App.mode === "menu" && M.page === 0) {
+      M.col = 1;
       M.sel[0] = 2 + Store.cfg.playlists.indexOf(pls[pls.length - 1]);
       render();
     }
@@ -445,11 +499,13 @@
     Dialog.open({
       title: "Remote Control Keys",
       text: [
-        "Guide: Arrows browse · OK tune · Shift+◀▶ day · G/Esc TV",
-        "TV: ▲▼ channel · 0-9 tune · L last · I info · G guide",
-        "Space pause · ◀ back 10s · ▶ ahead 30s · P progress bar",
-        "C subtitles · [ ] offset 0.1s · { } 1s · \\ reset · V subtitle file",
-        "M mute · F full screen · S settings",
+        "TV: ▲▼ or W S channel · 0-9 tune · G guide",
+        "◀▶ or A D 5s · L back 10s · J ahead 10s",
+        "Space or K pause · C captions · M mute · F full screen",
+        "Enter or Esc controls & info · I info · P controls",
+        "Shift+C subtitle options · Shift+F screen options",
+        "Menus: arrows or W A S D · Enter OK · Esc or Backspace back",
+        "F1 settings, anywhere",
       ].join("\n"),
       buttons: [{ label: "OK" }],
     });
@@ -457,52 +513,64 @@
 
   // ------------------------------------------------------------------- input
   function key(e) {
-    const k = e.key;
+    const k = e.key, nav = U.nav(e);
     if (M.moving) {
-      switch (k) {
-        case "ArrowUp": moveBy(-1); break;
-        case "ArrowDown": moveBy(1); break;
+      switch (nav || k) {
+        case "up": moveBy(-1); break;
+        case "down": moveBy(1); break;
         case "PageUp": moveBy(-VIS); break;
         case "PageDown": moveBy(VIS); break;
         case "Home": moveBy(-1e9); break;
         case "End": moveBy(1e9); break;
-        case "Enter": case " ": case "Escape": case "Backspace": drop(); break;
+        case "ok": case "back": case " ": drop(); break;
         default: return false;
       }
       return true;
     }
-    if (/^[0-9]$/.test(k) && M.page === 1) { numEntry(k); return true; }
-    switch (k) {
-      case "ArrowUp": selBy(-1); break;
-      case "ArrowDown": selBy(1); break;
+    if (/^[0-9]$/.test(k) && M.page === 1) { M.col = 1; numEntry(k); return true; }
+    if (M.col === 0) {
+      switch (nav || k) {
+        case "up": go(M.page - 1); break;
+        case "down": go(M.page + 1); break;
+        case "right": case "ok": case " ": focusRows(true); break;
+        case "left": break;
+        case "back": close(); break;
+        case "Tab": go((M.page + 1) % PAGES.length); break;
+        case "f": case "F": App.act.fullscreen(); break;
+        default: return false;
+      }
+      return true;
+    }
+    switch (nav || k) {
+      case "up": selBy(-1); break;
+      case "down": selBy(1); break;
       case "PageUp": selBy(-VIS); break;
       case "PageDown": selBy(VIS); break;
       case "Home": selBy(-1e9); break;
       case "End": selBy(1e9); break;
-      case "ArrowLeft": go(M.page - 1); break;
-      case "ArrowRight": case "Tab": go(M.page + 1); break;
-      case "Enter": case " ": activate(); break;
+      case "left": case "back": focusRows(false); break;
+      case "right": break;
+      case "ok": case " ": activate(); break;
+      case "Tab": go((M.page + 1) % PAGES.length); break;
       case "h": case "H": { const c = channelAt(M.sel[1]); if (c) setHidden(c, !c.hidden); break; }
       case "f": case "F": App.act.fullscreen(); break;
-      case "Escape": case "Backspace": case "s": case "S": case "g": case "G": close(); break;
       default: return false;
     }
     return true;
   }
 
-  $("m-prev").addEventListener("click", () => go(M.page - 1));
-  $("m-next").addEventListener("click", () => go(M.page + 1));
-  $("m-page").addEventListener("click", () => go(M.page + 1));
-
   window.Settings = {
+    /** With a page number, opens straight into that page's rows. */
     open(page) {
-      if (typeof page === "number") M.page = page;
+      if (typeof page === "number") { M.page = page; M.col = 1; }
+      else M.col = 0;
       M.moving = null;
       render();
     },
+    close,
     render,
     key,
-    wheel(d) { if (M.moving) moveBy(d); else selBy(d); },
+    wheel(d) { if (M.moving) moveBy(d); else if (M.col === 0) go(M.page + d); else selBy(d); },
     addFiles,
   };
 })();

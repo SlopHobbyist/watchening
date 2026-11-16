@@ -10,6 +10,7 @@
  *   hidden: [channel keys]
  *   prefs:  { epgUrl, ccDefault, ccSize, proxy }
  *   last:   channel key last watched
+ *   ccOffsets, screen, screenCh: subtitle offsets and screen options (see below)
  * }
  */
 (function () {
@@ -21,6 +22,9 @@
     hidden: [],
     prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "" },
     last: "",
+    ccOffsets: {},   // channel key -> subtitle offset (seconds)
+    screen: {},      // screen options for every channel: { aspect, scale, crop, overscan }
+    screenCh: {},    // channel key -> screen options of its own
   });
 
   function load() {

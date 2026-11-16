@@ -60,6 +60,7 @@
     ccWanted: false,  // turn captions on as soon as a track shows up
     ccDefault: false,
     ccOffset: 0,      // seconds; positive shows subtitles later
+    lastCC: null,     // track C turns back on
     extCues: null, extName: "",
     hls: null, ts: null, token: 0,
     reloads: 0,       // automatic reloads after stalls, this tune
@@ -466,9 +467,15 @@
 
   P.ccTracks = () => {
     const list = textTracks().map((t) => ({ t, label: trackLabel(t) }));
+    // two "English" tracks: number them
+    const count = {};
+    list.forEach((x) => (count[x.label] = (count[x.label] || 0) + 1));
+    const seen = {};
+    list.forEach((x) => { if (count[x.label] > 1) x.label += " " + (seen[x.label] = (seen[x.label] || 0) + 1); });
     if (P.extCues) list.push({ t: EXT, label: P.extName || "Subtitle file" });
     return list;
   };
+  P.EXT = EXT;
   P.ccLabel = () => {
     const x = P.ccTracks().find((x) => x.t === P.cc);
     return x ? x.label : "";
@@ -489,6 +496,7 @@
     emit("cc");
   }
   function resetCC() {
+    P.lastCC = null;
     P.extCues = null;
     P.extName = "";
     P.ccOffset = 0;
@@ -509,18 +517,24 @@
   });
   video.textTracks.addEventListener("change", applyModes);
 
-  /** Off -> track 1 -> track 2 -> ... -> Off. Returns the new label, or null if none exist. */
-  P.cycleCC = () => {
+  /** Choose a subtitle track (null: off). */
+  P.setTrack = (t) => {
+    if (t) P.lastCC = t;
+    P.ccWanted = !!t;
+    setCC(t || null);
+  };
+  /** C: off <-> the last track used (else the first). Returns the new label,
+   *  "Off", or null when the stream has no subtitles. */
+  P.toggleCC = () => {
+    if (P.cc) { P.setTrack(null); return "Off"; }
     const list = P.ccTracks();
     if (!list.length) return null;
-    const i = list.findIndex((x) => x.t === P.cc);
-    const next = i + 1 < list.length ? list[i + 1] : null;
-    P.ccWanted = !!next;
-    setCC(next ? next.t : null);
-    return next ? next.label : "Off";
+    const pick = list.find((x) => x.t === P.lastCC) || list[0];
+    P.setTrack(pick.t);
+    return pick.label;
   };
-  P.nudgeOffset = (d) => {
-    P.ccOffset = d === 0 ? 0 : Math.round((P.ccOffset + d) * 10) / 10;
+  P.setOffset = (sec) => {
+    P.ccOffset = Math.round(U.clamp(sec, -60, 60) * 10) / 10;
     kickCC();
     return P.ccOffset;
   };
@@ -529,10 +543,10 @@
     if (!cues.length) throw new Error("No subtitles were found in that file");
     P.extCues = cues;
     P.extName = name.replace(/\.(srt|vtt)$/i, "");
-    P.ccWanted = true;
-    setCC(EXT);
+    P.setTrack(EXT);
     return cues.length;
   };
+  P.ccSize = () => [0, 1, 2].find((n) => tv.classList.contains("cc-s" + n)) ?? 1;
   P.setCCSize = (n) => {
     tv.classList.remove("cc-s0", "cc-s1", "cc-s2");
     tv.classList.add("cc-s" + U.clamp(n | 0, 0, 2));
@@ -563,4 +577,65 @@
     }
   }
   function kickCC() { if (!raf) raf = requestAnimationFrame(renderCC); }
+
+  // ---------------------------------------------------------- screen options
+  /*
+   * How the picture fills the screen while watching (the guide's small
+   * picture always fills its frame):
+   *   aspect    auto | 16:9 | 4:3   the picture's shape (overrides the stream's)
+   *   crop      off | sides | tb    sides: keep the middle 4:3 of a wider picture
+   *                                 (4:3 shows sent letterboxed in 16:9);
+   *                                 tb: keep the middle 16:9 of a taller one
+   *   overscan  0-10                percent trimmed off the width and height
+   *   scale     fit | stretch | zoom  what's left: whole with black bars /
+   *                                 stretched to the screen / filling it, edges cut
+   * The <video> box is sized so the kept part lands where it should, and
+   * clip-path hides the cropped part.
+   */
+  P.SCREEN_DEFAULT = { aspect: "auto", scale: "fit", crop: "off", overscan: 0 };
+  P.screen = Object.assign({}, P.SCREEN_DEFAULT);
+  let fullView = false;
+  P.setScreen = (s) => {
+    P.screen = Object.assign({}, P.SCREEN_DEFAULT, s);
+    layoutVideo();
+  };
+  P.setFull = (on) => {
+    fullView = !!on;
+    layoutVideo();
+  };
+  P.videoSize = () => (video.videoWidth && video.videoHeight ? { w: video.videoWidth, h: video.videoHeight } : null);
+
+  function layoutVideo() {
+    const st = video.style;
+    const W = tv.clientWidth, H = tv.clientHeight;
+    const sc = P.screen;
+    const src = P.videoSize();
+    const a = sc.aspect === "16:9" ? 16 / 9 : sc.aspect === "4:3" ? 4 / 3 : src ? src.w / src.h : 0;
+    const plain = sc.aspect === "auto" && sc.scale === "fit" && sc.crop === "off" && !sc.overscan;
+    if (!fullView || !W || !H || !a || plain) {
+      for (const k of ["left", "top", "width", "height", "right", "bottom", "objectFit", "clipPath"]) st[k] = "";
+      return;
+    }
+    let fx = 1, fy = 1; // fraction of the width / height kept
+    if (sc.crop === "sides" && a > 4 / 3) fx = 4 / 3 / a;
+    if (sc.crop === "tb" && a < 16 / 9) fy = a / (16 / 9);
+    const keep = 1 - U.clamp(sc.overscan || 0, 0, 10) / 100;
+    fx *= keep;
+    fy *= keep;
+    const av = (a * fx) / fy; // shape of the part we keep
+    let dw, dh;               // where it goes on screen
+    if (sc.scale === "stretch") { dw = W; dh = H; }
+    else if ((sc.scale === "zoom") === av > W / H) { dh = H; dw = H * av; }
+    else { dw = W; dh = W / av; }
+    const ew = dw / fx, eh = dh / fy;  // whole picture, cropped parts included
+    const ix = (ew - dw) / 2, iy = (eh - dh) / 2;
+    Object.assign(st, {
+      left: (W - ew) / 2 + "px", top: (H - eh) / 2 + "px", width: ew + "px", height: eh + "px",
+      right: "auto", bottom: "auto", objectFit: "fill",
+      clipPath: ix > 0.5 || iy > 0.5 ? `inset(${iy.toFixed(1)}px ${ix.toFixed(1)}px)` : "",
+    });
+  }
+  P.layout = layoutVideo;
+  video.addEventListener("resize", () => { layoutVideo(); emit("size"); });
+  video.addEventListener("loadedmetadata", layoutVideo);
 })();

@@ -1,0 +1,55 @@
+# Hosts the web UI as static files with nginx.
+#
+#   docker compose up -d            -> http://localhost:8080
+#   WEBUI_PORT=80 docker compose up -d   (pick another host port)
+#
+# Everything runs in the browser (settings and playlists live in the
+# viewer's own browser storage), so there is no backend or database.
+#
+# Note: many IPTV streams are plain http://. Browsers block those on a page
+# opened over https://, so serve this over http:// unless every stream you
+# use is https://.
+
+name: watchening
+
+services:
+  webui:
+    image: nginx:stable-alpine
+    container_name: watchening-webui
+    restart: unless-stopped
+    ports:
+      - "${WEBUI_PORT:-8080}:80"
+    volumes:
+      # Edits to ./webui show up on the next page load, no rebuild needed.
+      - ./webui:/usr/share/nginx/html:ro
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+configs:
+  nginx_conf:
+    content: |
+      server {
+          listen 80;
+          server_name _;
+          root /usr/share/nginx/html;
+          index index.html;
+
+          # Text assets compress well; the lineup file is large.
+          gzip on;
+          gzip_comp_level 5;
+          gzip_min_length 1024;
+          gzip_types text/css application/javascript text/javascript image/svg+xml text/xml application/xml;
+
+          # Revalidate on every load so updated files are picked up right away.
+          add_header Cache-Control "no-cache" always;
+
+          location / {
+              try_files $$uri $$uri/ =404;
+          }
+      }

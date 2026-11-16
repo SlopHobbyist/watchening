@@ -1,13 +1,17 @@
 /*
  * iGuide-style IPTV viewer: program guide, full-screen player, settings.
  *
- * Keys (guide):    arrows move · PgUp/PgDn page · Shift+Left/Right -/+ 1 day
- *                  Enter tune · 0-9 channel entry · Esc / G back to TV · S settings
- * Keys (watching): Up/Down, PgUp/PgDn channel · 0-9 tune · Enter / I info
- *                  Space pause · Left/Right rewind 10s / forward 30s
- *                  C subtitles · [ ] subtitle offset -/+0.1s ({ } 1s, \ reset)
- *                  V load .srt/.vtt · M mute · L last channel · F full screen
- *                  G / Esc guide · S settings
+ * Keys (watching): Up / W previous channel · Down / S next channel · 0-9 tune
+ *                  Right / D ahead 5s · Left / A back 5s · J ahead 10s · L back 10s
+ *                  Space / K play/pause · C captions on/off · Shift+C subtitle options
+ *                  Shift+F screen options · M mute · F full screen · G guide
+ *                  Enter / Esc controls + info · I info · P controls
+ *                  (also: PgUp/PgDn channel, Backspace last channel,
+ *                   [ ] subtitle offset -/+0.1s, { } 1s, \ reset, media keys)
+ * Keys (menus):    arrows / WASD move · Enter OK · Esc / Backspace back
+ *                  guide: Shift+Left/Right -/+ 1 day · PgUp/PgDn page · 0-9 channel
+ *                  Esc leaves the guide for the picture
+ * Anywhere:        F1 settings
  * Mouse:           click a listing to select it, click again to tune · wheel scrolls
  *                  click the picture to watch; while watching, move the mouse
  *                  for the control bar, double-click for full screen
@@ -222,8 +226,8 @@
       els.progs.replaceChildren();
       els.empty.classList.add("show");
       els.empty.textContent = App.all.length
-        ? "All channels are hidden. Press S for Settings to show them."
-        : "No channels yet. Press S (or choose Settings below) to add an M3U playlist.";
+        ? "All channels are hidden. Press F1 for Settings to show them."
+        : "No channels yet. Press F1 for Settings to add an M3U playlist.";
       App.showInfo({
         title: "Welcome",
         desc: "Add an IPTV playlist (M3U or M3U8) from a web address or a file on this computer, then come back here to browse.",
@@ -278,6 +282,7 @@
     const t = U.fmtClock(Date.now());
     els.clock.textContent = t;
     $("b-clock").textContent = t;
+    $("m-clock").textContent = t;
   }
 
   // -------------------------------------------------------------- navigation
@@ -352,7 +357,8 @@
     stage.classList.toggle("watching", m === "watch");
     stage.classList.toggle("in-menu", m === "menu");
     document.body.classList.toggle("watching", m === "watch");
-    if (m !== "watch") { hideBanner(); hidePbar(); }
+    document.body.classList.toggle("in-menu", m === "menu");
+    if (m !== "watch") { hideBanner(); hidePbar(); Panel.close(); }
     layoutTv();
   }
   App.openGuide = function () {
@@ -371,9 +377,16 @@
     setMode("watch");
     showBanner();
   };
+  // settings goes back to wherever it was opened from
+  let menuFrom = "guide";
   App.openMenu = function (page) {
+    if (App.mode !== "menu") menuFrom = App.mode;
     setMode("menu");
     Settings.open(page);
+  };
+  App.closeMenu = function () {
+    if (menuFrom === "watch" && N()) App.watch();
+    else App.openGuide();
   };
   function enter() {
     if (!N()) return App.openMenu();
@@ -397,6 +410,7 @@
       tv.style.width = r.width + "px";
       tv.style.height = r.height + "px";
     }
+    Player.setFull(App.mode === "watch");
   }
 
   // ------------------------------------------------------------ channel entry
@@ -431,6 +445,8 @@
     Store.cfg.last = ch.key;
     Store.save();
     Player.load(ch);
+    Player.setOffset(Store.cfg.ccOffsets[ch.key] || 0);
+    Player.setScreen(screenFor(ch.key));
   }
   App.tuneKey = (key) => {
     const i = App.channels.findIndex((c) => c.key === key);
@@ -454,7 +470,6 @@
   function showBanner(ms = 5000) {
     const ch = tunedCh();
     if (!ch || App.mode !== "watch") return;
-    hidePbar();
     const p = programAt(ch, Date.now());
     const chanEl = $("b-chan"), titleEl = $("b-title");
     renderClock();
@@ -469,9 +484,29 @@
     fitText($("b-desc"), desc, true);
     clearTimeout(bannerTimer);
     bannerTimer = setTimeout(hideBanner, ms);
+    placeOverlays();
   }
-  function hideBanner() { clearTimeout(bannerTimer); $("banner").classList.remove("show"); }
+  function hideBanner() {
+    clearTimeout(bannerTimer);
+    $("banner").classList.remove("show");
+    placeOverlays();
+  }
   const bannerShown = () => $("banner").classList.contains("show");
+
+  /** Info banner and control bar can show together (the bar stacks above
+   *  the banner); captions move up out of their way, without animating. */
+  function placeOverlays() {
+    const b = bannerShown(), p = pbarShown();
+    stage.classList.toggle("both", b && p);
+    tv.classList.toggle("lift-b", b && !p);
+    tv.classList.toggle("lift-p", p && !b);
+    tv.classList.toggle("lift-bp", b && p);
+  }
+  /** Enter / Esc: show both, or hide whichever is showing. */
+  function toggleOverlays() {
+    if (bannerShown() || pbarShown()) { hideBanner(); hidePbar(); }
+    else { showBanner(6000); showPbar(6000); }
+  }
 
   // ------------------------------------------------------- progress / trick bar
   const pb = {
@@ -490,9 +525,8 @@
 
   function showPbar(ms = 4000) {
     if (App.mode !== "watch" || !tunedCh()) return;
-    hideBanner();
     pb.root.classList.add("show");
-    tv.classList.add("lifted");
+    placeOverlays();
     renderPbar();
     clearInterval(pbarTick);
     pbarTick = setInterval(renderPbar, 250);
@@ -510,7 +544,7 @@
     clearTimeout(pbarTimer);
     clearInterval(pbarTick);
     pb.root.classList.remove("show");
-    tv.classList.remove("lifted");
+    placeOverlays();
   }
 
   function renderPbar() {
@@ -579,27 +613,27 @@
       if (!Player.togglePause()) return;
       showPbar();
     },
-    rew() {
-      if (Player.skip(-10)) flash = { dir: -1, until: Date.now() + 900 };
-      else osd("Rewind isn't available on this channel");
+    /** Jump `sec` seconds (negative: back). */
+    skip(sec) {
+      if (Player.skip(sec)) flash = { dir: Math.sign(sec), until: Date.now() + 900 };
+      else osd(sec < 0 ? "Rewind isn't available on this channel" : "Fast forward isn't available on this channel");
       showPbar();
     },
-    ff() {
-      if (Player.skip(30)) flash = { dir: 1, until: Date.now() + 900 };
-      else osd("Fast forward isn't available on this channel");
-      showPbar();
-    },
+    rew() { act.skip(-10); },
+    ff() { act.skip(10); },
     cc() {
-      const label = Player.cycleCC();
-      if (label === null) osd("No subtitles in this stream. Press V to load an .srt or .vtt file.", 4000);
+      const label = Player.toggleCC();
+      if (label === null) osd("No subtitles in this stream. Shift+C for subtitle options.", 4000);
       else osd(label === "Off" ? "Subtitles Off" : `Subtitles: ${label}`);
       if (pbarShown()) renderPbar();
     },
     offset(d) {
-      const o = Player.nudgeOffset(d);
+      const o = setOffset(d === 0 ? 0 : Player.ccOffset + d);
       osd(`Subtitle Offset ${fmtOffset(o)}` + (Player.cc ? "" : " (subtitles are off)"));
     },
     subFile() { $("file-sub").click(); },
+    subs() { togglePanel("subs"); },
+    screen() { togglePanel("screen"); },
     mute() { osd(Player.toggleMute() ? "Mute" : "Sound On"); },
     guide() { App.openGuide(); },
     fullscreen() {
@@ -610,6 +644,126 @@
     menu() { App.openMenu(); },
   };
   App.act = act;
+
+  // -------------------------------------------------------- pop-out options
+  /** Subtitle offset, remembered per channel. */
+  function setOffset(sec) {
+    const o = Player.setOffset(sec);
+    const key = S.tunedKey;
+    if (key) {
+      if (o) Store.cfg.ccOffsets[key] = o; else delete Store.cfg.ccOffsets[key];
+      Store.save();
+    }
+    return o;
+  }
+
+  const CC_SIZES = ["Small", "Medium", "Large"];
+  function subtitleRows() {
+    const tracks = Player.ccTracks();
+    const rows = [{ label: "Off", check: !Player.cc, desc: "No subtitles.", act: () => Player.setTrack(null) }];
+    for (const x of tracks) {
+      const t = x.t;
+      const desc = t === Player.EXT ? "Subtitles from a file on this computer."
+        : (t.kind === "captions" ? "Closed captions" : "Subtitles") + (t.language ? ` (${t.language})` : "") + " sent by this channel.";
+      rows.push({ label: x.label, check: Player.cc === t, desc, act: () => Player.setTrack(t) });
+    }
+    if (!tracks.length) {
+      rows.push({ label: "None in this stream", disabled: true });
+    }
+    rows.push({ sep: true });
+    rows.push({
+      label: "Offset", value: fmtOffset(Player.ccOffset),
+      desc: "◀ shows subtitles sooner, ▶ later, by 0.1s (hold Shift for 1s). Remembered for this channel.",
+      step: (d, big) => setOffset(Player.ccOffset + d * (big ? 1 : 0.1)),
+      act: () => {},
+    });
+    rows.push({ label: "Reset Offset", desc: "Put the subtitles back in step with the stream (offset 0.0s).", act: () => setOffset(0) });
+    rows.push({
+      label: "Size", value: CC_SIZES[Player.ccSize()],
+      desc: "Size of the subtitle text. The same for every channel.",
+      step: (d) => App.setPrefs({ ccSize: U.clamp(Player.ccSize() + d, 0, 2) }),
+      act: () => App.setPrefs({ ccSize: (Player.ccSize() + 1) % 3 }),
+    });
+    rows.push({
+      label: "Load Subtitle File...",
+      desc: "Show an .srt or .vtt file from this computer over this channel. You can also drag the file onto the window.",
+      act: () => $("file-sub").click(),
+    });
+    return rows;
+  }
+
+  // Screen options apply to every channel, unless a channel has its own.
+  const screenFor = (key) => Object.assign({}, Player.SCREEN_DEFAULT, Store.cfg.screen, (key && Store.cfg.screenCh[key]) || {});
+  const ASPECTS = [["auto", "Auto"], ["16:9", "16:9"], ["4:3", "4:3"]];
+  const SCALES = [["fit", "Fit"], ["stretch", "Stretch"], ["zoom", "Zoom"]];
+  const CROPS = [["off", "Off"], ["sides", "Sides"], ["tb", "Top/Bottom"]];
+  const nameOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
+  const cycle = (list, v, d) => list[(Math.max(0, list.findIndex((x) => x[0] === v)) + d + list.length) % list.length][0];
+
+  function changeScreen(patch) {
+    const key = S.tunedKey;
+    const own = key && Store.cfg.screenCh[key];
+    Object.assign(own || Store.cfg.screen, patch);
+    Store.save();
+    Player.setScreen(screenFor(key));
+  }
+  function screenRows() {
+    const sc = Player.screen, key = S.tunedKey;
+    const own = !!(key && Store.cfg.screenCh[key]);
+    const src = Player.videoSize();
+    const opt = (label, list, prop, desc) => ({
+      label, value: nameOf(list, sc[prop]), desc,
+      step: (d) => changeScreen({ [prop]: cycle(list, sc[prop], d) }),
+    });
+    return [
+      opt("Aspect Ratio", ASPECTS, "aspect", {
+        auto: "Use the channel's own shape" + (src ? ` (${src.w}x${src.h})` : "") + ". Pick 16:9 or 4:3 if people look too thin or too wide.",
+        "16:9": "Show the picture as widescreen (16:9), whatever shape the channel says it is.",
+        "4:3": "Show the picture as 4:3, whatever shape the channel says it is.",
+      }[sc.aspect]),
+      opt("Scaling", SCALES, "scale", {
+        fit: "Show the whole picture, with black bars where its shape doesn't match the screen.",
+        stretch: "Stretch the picture to fill the screen. Use with Crop Sides to send 4:3 shows out as 16:9.",
+        zoom: "Fill the screen without reshaping the picture, cutting off whatever doesn't fit.",
+      }[sc.scale]),
+      opt("Crop", CROPS, "crop", {
+        off: "Show the whole picture, including any black bars built into it.",
+        sides: "Trim the black bars beside 4:3 shows sent inside a 16:9 picture, leaving the middle 4:3.",
+        tb: "Trim the black bars above and below widescreen shows sent inside a 4:3 picture.",
+      }[sc.crop]),
+      {
+        label: "Overscan", value: (sc.overscan || 0) + "%",
+        desc: "Trim the outer edge of the picture, as a TV does. Hides lines and noise along the edges of some channels.",
+        step: (d) => changeScreen({ overscan: U.clamp((sc.overscan || 0) + d, 0, 10) }),
+      },
+      { sep: true },
+      {
+        label: "Apply To", value: own ? "This Channel" : "All Channels",
+        desc: own ? "These settings are only for this channel. Other channels use the settings for all channels."
+          : "These settings are for every channel without settings of its own. Choose This Channel to set this one apart.",
+        step: () => {
+          if (!key) return;
+          if (own) delete Store.cfg.screenCh[key];
+          else Store.cfg.screenCh[key] = Object.assign({}, sc);
+          Store.save();
+          Player.setScreen(screenFor(key));
+        },
+      },
+      { label: "Reset to Defaults", desc: "Auto shape, Fit, no crop, no overscan.", act: () => changeScreen(Object.assign({}, Player.SCREEN_DEFAULT)) },
+    ];
+  }
+
+  const PANELS = {
+    subs: { title: "Subtitle Options", rows: subtitleRows },
+    screen: { title: "Screen Options", rows: screenRows },
+  };
+  function togglePanel(id) {
+    if (Panel.id() === id) return Panel.close();
+    if (App.mode !== "watch" || !tunedCh()) return;
+    hideBanner();
+    hidePbar();
+    Panel.open(Object.assign({ id }, PANELS[id]));
+  }
 
   Player.on((type, msg) => {
     if (type === "error") {
@@ -624,6 +778,7 @@
       if (pbarShown()) renderPbar();
       if (type === "state" && App.mode === "watch" && bannerShown() && !Player.loading) showBanner();
     }
+    if (type === "cc" || type === "tracks" || type === "size") Panel.refresh();
   });
 
   $("file-sub").addEventListener("change", async (e) => {
@@ -643,44 +798,50 @@
 
   // ------------------------------------------------------------------- input
   function keyWatch(e, k) {
-    switch (k) {
-      case "ArrowUp": case "PageUp": case "ChannelUp": case "+": surf(1); break;
-      case "ArrowDown": case "PageDown": case "ChannelDown": case "-": surf(-1); break;
-      case " ": case "k": case "K": case "MediaPlayPause": case "MediaPlay": case "MediaPause": act.play(); break;
-      case "ArrowLeft": case ",": case "MediaRewind": case "MediaTrackPrevious": act.rew(); break;
-      case "ArrowRight": case ".": case "MediaFastForward": case "MediaTrackNext": act.ff(); break;
-      case "Enter": case "i": case "I": bannerShown() ? hideBanner() : showBanner(); break;
-      case "c": case "C": act.cc(); break;
+    const c = k.length === 1 ? k.toLowerCase() : k;
+    if (e.shiftKey && c === "c") { act.subs(); return true; }
+    if (e.shiftKey && c === "f") { act.screen(); return true; }
+    switch (c) {
+      case "ArrowUp": case "w": case "PageUp": surf(-1); break;
+      case "ArrowDown": case "s": case "PageDown": surf(1); break;
+      case "ChannelUp": surf(1); break;
+      case "ChannelDown": surf(-1); break;
+      case "ArrowRight": case "d": act.skip(5); break;
+      case "ArrowLeft": case "a": act.skip(-5); break;
+      case "j": case "MediaFastForward": case "MediaTrackNext": act.skip(10); break;
+      case "l": case "MediaRewind": case "MediaTrackPrevious": act.skip(-10); break;
+      case " ": case "k": case "MediaPlayPause": case "MediaPlay": case "MediaPause": act.play(); break;
+      case "c": act.cc(); break;
+      case "m": act.mute(); break;
+      case "Enter": case "Escape": toggleOverlays(); break;
+      case "i": bannerShown() ? hideBanner() : showBanner(); break;
+      case "p": pbarShown() ? hidePbar() : showPbar(); break;
+      case "g": case "ContextMenu": App.openGuide(); break;
+      case "Backspace": lastChannel(); break;
       case "[": act.offset(-0.1); break;
       case "]": act.offset(0.1); break;
       case "{": act.offset(-1); break;
       case "}": act.offset(1); break;
       case "\\": act.offset(0); break;
-      case "v": case "V": act.subFile(); break;
-      case "m": case "M": act.mute(); break;
-      case "l": case "L": case "Backspace": lastChannel(); break;
-      case "p": case "P": pbarShown() ? hidePbar() : showPbar(); break;
-      case "Escape":
-        if (bannerShown()) hideBanner();
-        else if (pbarShown()) hidePbar();
-        else App.openGuide();
-        break;
-      case "g": case "G": case "ContextMenu": App.openGuide(); break;
       default: return false;
     }
     return true;
   }
   function keyGuide(e, k) {
     if (S.entry && k === "Enter") { commitEntry(); return true; }
+    switch (U.nav(e)) {
+      case "up": moveVert(-1); return true;
+      case "down": moveVert(1); return true;
+      case "left": e.shiftKey ? shiftDay(-1) : moveLeft(); return true;
+      case "right": e.shiftKey ? shiftDay(1) : moveRight(); return true;
+      case "ok": enter(); return true;
+      case "back": if (N()) App.watch(); return true;
+    }
     switch (k) {
-      case "ArrowUp": moveVert(-1); break;
-      case "ArrowDown": moveVert(1); break;
-      case "ArrowLeft": e.shiftKey ? shiftDay(-1) : moveLeft(); break;
-      case "ArrowRight": e.shiftKey ? shiftDay(1) : moveRight(); break;
       case "PageUp": case "ChannelUp": page(-1); break;
       case "PageDown": case "ChannelDown": page(1); break;
-      case "Enter": case " ": enter(); break;
-      case "Escape": case "g": case "G": case "Backspace": if (N()) App.watch(); break;
+      case " ": enter(); break;
+      case "g": case "G": if (N()) App.watch(); break;
       default: return false;
     }
     return true;
@@ -691,11 +852,16 @@
     if (Dialog.key(e)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key;
+    if (k === "F1") {
+      e.preventDefault();
+      if (App.mode === "menu") Settings.close(); else App.openMenu();
+      return;
+    }
     if (App.mode === "menu") { if (Settings.key(e)) e.preventDefault(); return; }
+    if (App.mode === "watch" && Panel.key(e)) { e.preventDefault(); return; }
     if (/^[0-9]$/.test(k)) { digit(k); e.preventDefault(); return; }
     let handled = true;
-    if (k === "s" || k === "S") App.openMenu();
-    else if (k === "f" || k === "F") act.fullscreen();
+    if ((k === "f" || k === "F") && !e.shiftKey) act.fullscreen();
     else handled = App.mode === "watch" ? keyWatch(e, k) : keyGuide(e, k);
     if (handled) e.preventDefault();
   });
@@ -709,7 +875,7 @@
     const d = Math.sign(wheelAcc);
     wheelAcc = 0;
     if (App.mode === "menu") Settings.wheel(d);
-    else if (App.mode === "watch") surf(-d);
+    else if (App.mode === "watch") Panel.isOpen() ? Panel.move(d) : surf(d);
     else moveVert(d);
   }, { passive: true });
 
@@ -720,6 +886,7 @@
       if (App.mode === "guide") App.watch();
       return;
     }
+    if (Panel.isOpen()) return Panel.close();
     clearTimeout(clickTimer);
     clickTimer = setTimeout(() => (pbarShown() ? hidePbar() : showPbar()), 220);
   });
@@ -736,6 +903,7 @@
     document.body.classList.remove("idle");
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => document.body.classList.add("idle"), 3000);
+    if (Panel.isOpen()) return;
     if (Math.abs(e.movementX) + Math.abs(e.movementY) < 3) return;
     const now = Date.now();
     if (now - lastMove < 200) return;
@@ -753,7 +921,6 @@
     if (Player.seekFrac((e.clientX - r.left) / r.width)) showPbar();
   });
   $("banner").addEventListener("click", hideBanner);
-  document.querySelectorAll("#footer .fbtn").forEach((b) => b.addEventListener("click", () => act[b.dataset.act]()));
 
   // drag a playlist or subtitle file onto the window
   document.addEventListener("dragover", (e) => e.preventDefault());

@@ -70,16 +70,16 @@
       <div id="empty"></div>
     </div>
 
-    <div id="footer">
-      <div class="fbtn" data-act="watch">Watch TV</div>
-      <div class="fbtn" data-act="menu">Settings</div>
-      <div class="fbtn" data-act="fullscreen">Full Screen</div>
-      <div id="f-hint">OK Tune &middot; S Settings &middot; G Back to TV</div>
-    </div>
+    <div id="footer"></div>
   </div>
 
-  <!-- ===================== SETTINGS ===================== -->
+  <!-- ===================== SETTINGS (full screen) ===================== -->
   <div id="menu">
+    <div id="m-hdr">
+      <img id="m-logo" src="assets/comcast_logo_white.svg" alt="comcast" draggable="false">
+      <div id="m-name">Settings</div>
+      <div id="m-clock">12:00am</div>
+    </div>
     <div id="m-bar">
       <svg id="m-icon" viewBox="0 0 38 28" aria-hidden="true">
         <g fill="#fff">
@@ -88,19 +88,20 @@
           <rect x="1" y="22" width="5" height="4"/><rect x="9" y="22" width="27" height="4"/>
         </g>
       </svg>
-      <div id="m-title">Settings</div>
-      <svg class="m-arrow" id="m-prev" viewBox="0 0 10 16" aria-hidden="true"><path d="M9,1 L1,8 L9,15 Z" fill="#fff"/></svg>
-      <div id="m-page"></div>
-      <svg class="m-arrow" id="m-next" viewBox="0 0 10 16" aria-hidden="true"><path d="M1,1 L9,8 L1,15 Z" fill="#fff"/></svg>
-    </div>
-    <div id="m-list">
-      <div id="m-stripe"></div>
-      <div id="m-rows"></div>
-    </div>
-    <div id="m-foot">
-      <div id="m-hint"></div>
+      <div id="m-title"></div>
       <div id="m-pos"></div>
     </div>
+    <div id="m-body">
+      <div id="m-cats"></div>
+      <div id="m-stripe"></div>
+      <div id="m-list"><div id="m-rows"></div></div>
+    </div>
+    <div id="m-info">
+      <div id="mi-title"></div>
+      <div id="mi-chan"></div>
+      <div id="mi-desc"></div>
+    </div>
+    <div id="m-foot"><div id="m-hint"></div></div>
   </div>
 
   <!-- ===================== PLAYER OVERLAYS ===================== -->
@@ -127,10 +128,12 @@
   <!-- trick-play / program progress bar -->
   <div id="pbar">
     <div id="pb-ctl">
-      <div class="pb-btn" data-act="rew" title="Rewind 10s (Left)"><svg viewBox="0 0 24 16"><path d="M11,1 L1,8 L11,15 Z M23,1 L13,8 L23,15 Z"/></svg></div>
+      <div class="pb-btn" data-act="rew" title="Back 10s (L)"><svg viewBox="0 0 24 16"><path d="M11,1 L1,8 L11,15 Z M23,1 L13,8 L23,15 Z"/></svg></div>
       <div class="pb-btn" data-act="play" title="Play / Pause (Space)"><svg viewBox="0 0 24 16"><path id="pb-play-icon" d="M7,1 L19,8 L7,15 Z"/></svg></div>
-      <div class="pb-btn" data-act="ff" title="Forward 30s (Right)"><svg viewBox="0 0 24 16"><path d="M1,1 L11,8 L1,15 Z M13,1 L23,8 L13,15 Z"/></svg></div>
-      <div class="pb-btn txt" data-act="cc" title="Subtitles (C)">CC</div>
+      <div class="pb-btn" data-act="ff" title="Ahead 10s (J)"><svg viewBox="0 0 24 16"><path d="M1,1 L11,8 L1,15 Z M13,1 L23,8 L13,15 Z"/></svg></div>
+      <div class="pb-btn txt" data-act="cc" title="Captions (C)">CC</div>
+      <div class="pb-btn txt" data-act="subs" title="Subtitle Options (Shift+C)">Subtitles</div>
+      <div class="pb-btn txt" data-act="screen" title="Screen Options (Shift+F)">Screen</div>
       <div class="pb-btn txt" data-act="guide" title="Guide (G)">Guide</div>
     </div>
     <div id="pb-top">
@@ -146,6 +149,14 @@
       <span id="pb-pos"></span>
       <svg id="pb-state" viewBox="0 0 24 16"><path d=""/></svg>
     </div>
+  </div>
+
+  <!-- pop-out options over the picture: Subtitle Options, Screen Options -->
+  <div id="pnl">
+    <div id="pnl-title"></div>
+    <div id="pnl-rows"></div>
+    <div id="pnl-desc"></div>
+    <div id="pnl-hint"></div>
   </div>
 
   <!-- ===================== DIALOG ===================== -->
@@ -169,6 +180,7 @@
 <script src="js/subs.js"></script>
 <script src="js/store.js"></script>
 <script src="js/dialog.js"></script>
+<script src="js/panel.js"></script>
 <script src="js/player.js"></script>
 <script src="js/main.js"></script>
 <script src="js/settings.js"></script>
