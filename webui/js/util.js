@@ -106,7 +106,10 @@
    *  CORS proxy prefix; "{url}" in it is replaced with the encoded URL. */
   U.fetchText = async (url, proxy) => {
     let target = url;
-    if (proxy) target = proxy.includes("{url}") ? proxy.replace("{url}", encodeURIComponent(url)) : proxy + url;
+    // files on this server (the zlive guide) never need the proxy
+    let local = false;
+    try { local = new URL(url, location.href).origin === location.origin; } catch {}
+    if (proxy && !local) target = proxy.includes("{url}") ? proxy.replace("{url}", encodeURIComponent(url)) : proxy + url;
     let res;
     try {
       res = await fetch(target, { cache: "no-cache" });

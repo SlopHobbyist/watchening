@@ -1,9 +1,12 @@
-# Hosts the web UI as static files with nginx.
+# Hosts the web UI as static files with nginx, plus a guide builder for
+# zlive.st's channels.
 #
 #   docker compose up -d            -> http://localhost:8080
 #   WEBUI_PORT=80 docker compose up -d   (pick another host port)
+#   docker compose pull && docker compose up -d   (update; do this now and
+#                                   then, as iptv-org fixes guide sites often)
 #
-# Everything runs in the browser (settings and playlists live in the
+# Everything else runs in the browser (settings and playlists live in the
 # viewer's own browser storage), so there is no backend or database.
 #
 # Note: many IPTV streams are plain http://. Browsers block those on a page
@@ -22,6 +25,7 @@ services:
     volumes:
       # Edits to ./webui show up on the next page load, no rebuild needed.
       - ./webui:/usr/share/nginx/html:ro
+      - epg:/srv/epg:ro
     configs:
       - source: nginx_conf
         target: /etc/nginx/conf.d/default.conf
@@ -30,6 +34,35 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Guide listings for zlive.st's channels, served at /epg/zlive.xml.gz
+  # (the zlive playlist loads it by itself) with a report at /epg/status.json.
+  # It runs iptv-org's EPG grabber (github.com/iptv-org/epg) in their own
+  # image; ./epg matches zlive's channels to their channel database and
+  # picks each channel's best working guide site. The first guide appears a
+  # few minutes after start-up, then it's rebuilt every EPG_EVERY_HOURS.
+  epg:
+    image: ghcr.io/iptv-org/epg:master
+    container_name: watchening-epg
+    restart: unless-stopped
+    entrypoint: ["node", "/zlive/zlive-epg.mjs"]
+    environment:
+      EPG_DAYS: "${EPG_DAYS:-3}"                 # days of listings to fetch
+      EPG_EVERY_HOURS: "${EPG_EVERY_HOURS:-12}"  # hours between rebuilds
+      EPG_MAX_CONNECTIONS: "${EPG_MAX_CONNECTIONS:-5}"
+      TZ: UTC
+    volumes:
+      - ./epg:/zlive:ro
+      - epg:/out
+      - epg-work:/work
+    logging:
+      options:
+        max-size: "1m"
+        max-file: "3"
+
+volumes:
+  epg:        # the finished guide, shared with nginx
+  epg-work:   # last run's listings and which sites have been failing
 
 configs:
   nginx_conf:
@@ -44,12 +77,17 @@ configs:
           gzip on;
           gzip_comp_level 5;
           gzip_min_length 1024;
-          gzip_types text/css application/javascript text/javascript image/svg+xml text/xml application/xml;
+          gzip_types text/css application/javascript text/javascript image/svg+xml text/xml application/xml application/json;
 
           # Revalidate on every load so updated files are picked up right away.
           add_header Cache-Control "no-cache" always;
 
           location / {
               try_files $$uri $$uri/ =404;
+          }
+
+          # Written by the epg service.
+          location /epg/ {
+              alias /srv/epg/;
           }
       }

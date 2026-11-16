@@ -10,11 +10,17 @@
  *
  * Turned on, it is kept as a playlist of type "zlive" (id "zlive"), so it
  * gets the same channel order, hiding and hourly refresh as M3U playlists.
+ *
+ * Guide listings come from the epg container (see docker-compose.yaml),
+ * which writes an XMLTV file keyed by zlive's channel ids. nginx serves it
+ * at epg/zlive.xml.gz beside the page; the playlist names it like an M3U's
+ * url-tvg, so it loads with the other guide data.
  */
 (function () {
   "use strict";
   const BASE = "https://zlive.st/embed/";
   const MANIFEST = BASE + "manifest.json";
+  const GUIDE = new URL("../epg/zlive.xml.gz", document.currentScript.src).href;
 
   /** The manifest's text -> the same shape M3U.parse returns. Throws if it
    *  isn't a zlive manifest. */
@@ -31,7 +37,7 @@
         // built from the id rather than taken from `url`, so the player only
         // ever frames zlive's own embed pages
         url: BASE + encodeURIComponent(c.id),
-        tvgId: "",
+        tvgId: c.id, // the guide file uses zlive's ids
         tvgName: name,
         logo: "",
         group: [c.sport, c.region].filter((s) => s && s !== "Other").join(" · "),
@@ -39,7 +45,7 @@
         embed: true,
       });
     }
-    return { channels, epg: [] };
+    return { channels, epg: [GUIDE] };
   }
 
   /** The player link for a channel: autoplaying, with zlive's own controls,
@@ -54,5 +60,5 @@
     return u.href;
   }
 
-  window.Zlive = { MANIFEST, parse, embedUrl };
+  window.Zlive = { MANIFEST, GUIDE, parse, embedUrl };
 })();
