@@ -190,6 +190,10 @@
       img.referrerPolicy = "no-referrer";
       img.alt = "";
       img.draggable = false;
+      // only the guide's visible rows exist, so this already asks for just a
+      // few icons at a time; lazy/async keep them from holding up the page
+      img.loading = "lazy";
+      img.decoding = "async";
       img.onerror = () => img.remove();
       img.src = ch.logo;
       c.appendChild(img);
@@ -946,6 +950,7 @@
   App.rebuild = function () {
     const cfg = Store.cfg;
     const list = [], seen = new Set();
+    const icons = cfg.prefs.chanIcons !== false;
     for (const pl of cfg.playlists) {
       if (!pl.enabled) continue;
       const d = App.data.get(pl.id);
@@ -955,7 +960,8 @@
         for (let k = 2; seen.has(key); k++) key = pl.id + "|" + c.url + "#" + k;
         seen.add(key);
         list.push({
-          key, url: c.url, name: c.name, call: U.shortName(c.name), logo: c.logo, group: c.group,
+          key, url: c.url, name: c.name, call: U.shortName(c.name),
+          logo: c.logo || (icons ? Logos.find(c) : ""), group: c.group,
           tvgId: c.tvgId, tvgName: c.tvgName, plId: pl.id, plName: pl.name, embed: !!c.embed,
           hd: !!c.hd || /\b(HD|FHD|UHD|4K|1080[pi]?|720p)\b/i.test(c.name), sched: [], nat: list.length,
         });

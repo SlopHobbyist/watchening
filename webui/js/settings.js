@@ -6,7 +6,7 @@
  *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
- *   Options    subtitle defaults, CORS proxy, erase everything
+ *   Options    subtitle defaults, channel icons, CORS proxy, erase everything
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
  *       Left (A) / Esc / Backspace back out · Esc in the categories (or F1) closes
@@ -17,7 +17,7 @@
   const PAGES = [
     { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
-    { name: "Options", desc: "Subtitles, the playlist proxy, the remote control keys, and erasing everything." },
+    { name: "Options", desc: "Subtitles, channel icons, the playlist proxy, the remote control keys, and erasing everything." },
   ];
   const VIS = 7;          // visible rows
   const PITCH = 44;       // row height + gap
@@ -136,6 +136,11 @@
         text: "Subtitle Size", tag: ["Small", "Medium", "Large"][p.ccSize] || "Medium",
         info: { title: "Subtitle Size", desc: "Size of subtitle text on the picture. Also in Subtitle Options (Shift+C) while watching." },
         act: () => { App.setPrefs({ ccSize: ((p.ccSize | 0) + 1) % 3 }); render(); },
+      },
+      {
+        text: "Channel Icons", tag: p.chanIcons !== false ? "On" : "Off",
+        info: { title: "Channel Icons", desc: "Show a built-in icon, picked by channel name, for channels whose playlist has none (zlive.st channels never do). The icons are the ones the channels used around 2005." },
+        act: () => { App.setPrefs({ chanIcons: p.chanIcons === false }); App.rebuild(); render(); },
       },
       {
         text: "CORS Proxy for Playlists", tag: p.proxy ? "On" : "None",
