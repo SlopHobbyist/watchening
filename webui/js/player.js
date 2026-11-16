@@ -562,11 +562,18 @@
       if (P.cc === EXT) {
         for (const c of P.extCues) { if (c.start > t) break; if (t < c.end) out.push(c.text); }
       } else if (P.cc.cues) {
-        const cues = P.cc.cues;
+        const cues = P.cc.cues, on = [];
         for (let i = 0; i < cues.length; i++) {
           const c = cues[i];
-          if (c.startTime <= t && t < c.endTime && c.text) out.push(c.text);
+          if (c.startTime <= t && t < c.endTime && c.text) on.push(c);
         }
+        // The cue list is ordered by time (and, for equal starts, the one that
+        // ends last first), not by where each cue sits on screen. Broadcast
+        // captions send each row as its own cue with its row in `line`, so
+        // stack them by that: top row first. Cues without one ("auto") go at
+        // the bottom, where they'd be drawn; the sort keeps ties in order.
+        if (on.length > 1) on.sort((a, b) => lineKey(a) - lineKey(b));
+        for (const c of on) out.push(c.text);
       }
       html = out.map(Subs.html).filter(Boolean).join("<br>");
       raf = requestAnimationFrame(renderCC);
@@ -577,6 +584,13 @@
     }
   }
   function kickCC() { if (!raf) raf = requestAnimationFrame(renderCC); }
+
+  /** A cue's height on screen, smaller = higher. Row numbers (1 = top,
+   *  -1 = bottom) and percentages both sort the right way within a track. */
+  function lineKey(c) {
+    const l = c.line;
+    return typeof l === "number" && Number.isFinite(l) ? l : Infinity;
+  }
 
   // ---------------------------------------------------------- screen options
   /*
