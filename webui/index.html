@@ -7,10 +7,20 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- ===================== TV / VIDEO =====================
+     Lives outside the 800x600 stage so it can fill the whole window while
+     watching. In the guide and settings it is positioned over #pipslot. -->
+<div id="tv" class="pip">
+  <canvas id="tv-canvas" width="400" height="300"></canvas>
+  <video id="tv-video" playsinline></video>
+  <div id="cc" aria-live="off"></div>
+</div>
+
 <div id="stage">
 
-  <!-- ===================== GUIDE ===================== -->
-  <div id="guide">
+  <!-- shared top half: header, info panel, picture-in-picture frame -->
+  <div id="top">
     <div id="hdr">
       <img id="logo" src="assets/comcast_logo_white.svg" alt="comcast" draggable="false">
       <div id="tvl">TV Listings</div>
@@ -26,6 +36,11 @@
       <div id="i-desc"></div>
     </div>
 
+    <div id="pipframe"><div id="pipslot"></div></div>
+  </div>
+
+  <!-- ===================== GUIDE ===================== -->
+  <div id="guide">
     <div id="timebar">
       <div id="tb-day">Today</div>
       <div class="tb-sep" style="left:166px"></div>
@@ -52,21 +67,50 @@
       <div id="chans"></div>
       <div id="stripe"></div>
       <div id="progs"></div>
+      <div id="empty"></div>
     </div>
 
-    <div id="footer"></div>
+    <div id="footer">
+      <div class="fbtn" data-act="watch">Watch TV</div>
+      <div class="fbtn" data-act="menu">Settings</div>
+      <div class="fbtn" data-act="fullscreen">Full Screen</div>
+      <div id="f-hint">OK Tune &middot; S Settings &middot; G Back to TV</div>
+    </div>
   </div>
 
-  <!-- ===================== TV / VIDEO ===================== -->
-  <div id="tv" class="pip">
-    <canvas id="tv-canvas" width="400" height="300"></canvas>
-    <video id="tv-video" playsinline autoplay muted></video>
+  <!-- ===================== SETTINGS ===================== -->
+  <div id="menu">
+    <div id="m-bar">
+      <svg id="m-icon" viewBox="0 0 38 28" aria-hidden="true">
+        <g fill="#fff">
+          <rect x="1" y="2" width="5" height="4"/><rect x="9" y="2" width="27" height="4"/>
+          <rect x="1" y="12" width="5" height="4"/><rect x="9" y="12" width="27" height="4"/>
+          <rect x="1" y="22" width="5" height="4"/><rect x="9" y="22" width="27" height="4"/>
+        </g>
+      </svg>
+      <div id="m-title">Settings</div>
+      <svg class="m-arrow" id="m-prev" viewBox="0 0 10 16" aria-hidden="true"><path d="M9,1 L1,8 L9,15 Z" fill="#fff"/></svg>
+      <div id="m-page"></div>
+      <svg class="m-arrow" id="m-next" viewBox="0 0 10 16" aria-hidden="true"><path d="M1,1 L9,8 L1,15 Z" fill="#fff"/></svg>
+    </div>
+    <div id="m-list">
+      <div id="m-stripe"></div>
+      <div id="m-rows"></div>
+    </div>
+    <div id="m-foot">
+      <div id="m-hint"></div>
+      <div id="m-pos"></div>
+    </div>
   </div>
 
+  <!-- ===================== PLAYER OVERLAYS ===================== -->
   <!-- channel number entry while watching -->
   <div id="osd-num"></div>
 
-  <!-- info banner shown while watching -->
+  <!-- transient messages: "Closed Captions: English", "Subtitle Offset +0.5s" -->
+  <div id="osd"></div>
+
+  <!-- info banner shown on tune / Info -->
   <div id="banner">
     <div id="b-top">
       <div id="b-title"></div>
@@ -79,9 +123,54 @@
       <div id="b-desc"></div>
     </div>
   </div>
+
+  <!-- trick-play / program progress bar -->
+  <div id="pbar">
+    <div id="pb-ctl">
+      <div class="pb-btn" data-act="rew" title="Rewind 10s (Left)"><svg viewBox="0 0 24 16"><path d="M11,1 L1,8 L11,15 Z M23,1 L13,8 L23,15 Z"/></svg></div>
+      <div class="pb-btn" data-act="play" title="Play / Pause (Space)"><svg viewBox="0 0 24 16"><path id="pb-play-icon" d="M7,1 L19,8 L7,15 Z"/></svg></div>
+      <div class="pb-btn" data-act="ff" title="Forward 30s (Right)"><svg viewBox="0 0 24 16"><path d="M1,1 L11,8 L1,15 Z M13,1 L23,8 L13,15 Z"/></svg></div>
+      <div class="pb-btn txt" data-act="cc" title="Subtitles (C)">CC</div>
+      <div class="pb-btn txt" data-act="guide" title="Guide (G)">Guide</div>
+    </div>
+    <div id="pb-top">
+      <div id="pb-title"></div>
+      <div id="pb-chan"></div>
+    </div>
+    <div id="pb-bar">
+      <div id="pb-left"></div>
+      <div id="pb-track"><div id="pb-fill"></div><div id="pb-mark"></div></div>
+      <div id="pb-right"></div>
+    </div>
+    <div id="pb-tab">
+      <span id="pb-pos"></span>
+      <svg id="pb-state" viewBox="0 0 24 16"><path d=""/></svg>
+    </div>
+  </div>
+
+  <!-- ===================== DIALOG ===================== -->
+  <div id="dlg">
+    <div id="dlg-box">
+      <div id="dlg-title"></div>
+      <div id="dlg-body">
+        <div id="dlg-text"></div>
+        <div id="dlg-items"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<script src="lineup.js"></script>
-<script src="main.js"></script>
+<input type="file" id="file-m3u" accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/vnd.apple.mpegurl" multiple hidden>
+<input type="file" id="file-sub" accept=".srt,.vtt" hidden>
+
+<script src="js/util.js"></script>
+<script src="js/m3u.js"></script>
+<script src="js/xmltv.js"></script>
+<script src="js/subs.js"></script>
+<script src="js/store.js"></script>
+<script src="js/dialog.js"></script>
+<script src="js/player.js"></script>
+<script src="js/main.js"></script>
+<script src="js/settings.js"></script>
 </body>
 </html>
