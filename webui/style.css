@@ -2,6 +2,9 @@
  * iGuide-style IPTV guide and player. Everything except the video is laid out
  * on a fixed 800x600 (4:3) stage that main.js scales to fit the window; the
  * video (#tv) sits outside it so it can fill a widescreen window.
+ * 16:9 mode (#stage.wide) makes the stage 1067x600: the header and info panel
+ * widen, the picture-in-picture becomes 16:9 and the guide shows one more
+ * half hour, at the same scale.
  *
  * Typeface: Tiresias Screenfont (webui/fonts), the set-top box font.
  */
@@ -28,6 +31,9 @@
   --shadow: 1.5px 1.5px 1px rgba(0,0,0,.85);
   --slot: 196px;
 }
+#stage { --W: 800px; --pip: 336px; }   /* stage width; PIP frame width (incl. its 4px left border) */
+#stage.wide { --W: 1067px; --pip: 452px; }
+#stage:not(.wide) .wide-only { display: none; }
 
 * { box-sizing: border-box; }
 
@@ -42,7 +48,7 @@ html, body {
 #stage {
   position: absolute;
   left: 50%; top: 50%;
-  width: 800px; height: 600px;
+  width: var(--W); height: 600px;
   transform: translate(-50%, -50%) scale(var(--sx, 1), var(--sy, 1));   /* differ in squish mode */
   transform-origin: 50% 50%;
   overflow: hidden;
@@ -62,7 +68,7 @@ html, body {
 body.watching.idle, body.watching.idle * { cursor: none !important; }
 
 /* ------------------------------------------------------------------ guide */
-#top, #guide, #menu { position: absolute; left: 0; top: 0; width: 800px; height: 600px; pointer-events: none; }
+#top, #guide, #menu { position: absolute; left: 0; top: 0; width: var(--W); height: 600px; pointer-events: none; }
 #top > *, #guide > *, #menu > * { pointer-events: auto; }
 #stage.watching #top, #stage.watching #guide, #stage.watching #menu { visibility: hidden; }
 #stage.in-menu #guide, #stage:not(.in-menu) #menu { display: none; }
@@ -70,14 +76,14 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #stage.in-menu #top, body.in-menu #tv { visibility: hidden; }
 
 #pipframe {
-  position: absolute; left: 464px; top: 0; width: 336px; height: 253px;
+  position: absolute; right: 0; top: 0; width: var(--pip); height: 253px;
   border-left: 4px solid #11132d; border-bottom: 1px solid #11132d;
   pointer-events: none !important;   /* clicks reach the video underneath */
 }
 #pipslot { position: absolute; inset: 0; }
 
 #hdr {
-  position: absolute; left: 0; top: 0; width: 464px; height: 110px;
+  position: absolute; left: 0; top: 0; width: calc(var(--W) - var(--pip)); height: 110px;
   background: linear-gradient(#21486f, #1f456b 40%, #1d4268);
   border-bottom: 1px solid #13183a;
 }
@@ -85,7 +91,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #logo { position: absolute; left: 53px; top: 51px; width: 177px; height: auto; }
 
 #tvl, #clock {
-  position: absolute; right: calc(464px - 379px); font-size: 26.5px; line-height: 28px;
+  position: absolute; right: 85px; font-size: 26.5px; line-height: 28px;
   text-shadow: var(--shadow); white-space: nowrap;
 }
 #tvl { top: 38px; color: var(--lime); }
@@ -93,14 +99,14 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 
 /* TV Guide box is 65x56 on screen; the SVG's red box sits inside a 1024 square
    canvas, so crop to it and stretch vertically (CRT pixels weren't square). */
-#tvg { position: absolute; left: 386px; top: 41px; width: 65px; height: 56px; filter: drop-shadow(1px 1px 1px rgba(0,0,0,.6)); }
+#tvg { position: absolute; right: 13px; top: 41px; width: 65px; height: 56px; filter: drop-shadow(1px 1px 1px rgba(0,0,0,.6)); }
 #tvg img {
   position: absolute; width: 67.3px; height: 67.3px; left: -1.16px; top: -8.88px;
   transform-origin: 0 8.88px; transform: scaleY(1.13);
 }
 
 #info {
-  position: absolute; left: 0; top: 111px; width: 464px; height: 142px;
+  position: absolute; left: 0; top: 111px; width: calc(var(--W) - var(--pip)); height: 142px;
   background: linear-gradient(#131732 0%, #1f2a4e 30%, #33486d 55%, #52668a 80%, #6c7d97 100%);
 }
 #info > div { position: absolute; white-space: nowrap; text-shadow: var(--shadow); font-size: 26px; line-height: 28px; }
@@ -109,7 +115,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #i-time  { left: 55px; top: 32px; }
 #i-icons { right: 11px; top: 32px; display: flex; gap: 5px; align-items: center; height: 28px; }
 #info > #i-desc  {
-  left: 55px; top: 59px; width: 400px; height: 81px; white-space: normal;
+  left: 55px; top: 59px; right: 9px; height: 81px; white-space: normal;
   overflow: hidden; font-size: 25.7px; line-height: 26.5px;
 }
 /* rating / HD badges: flat white box, lettering cut out (see badgeSvg in main.js).
@@ -126,7 +132,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 
 /* --------------------------------------------------------------- timebar */
 #timebar {
-  position: absolute; left: 0; top: 253px; width: 800px; height: 40px;
+  position: absolute; left: 0; top: 253px; width: var(--W); height: 40px;
   border-top: 4px solid #111230;
   background: linear-gradient(#173f6b, #143d69);
 }
@@ -141,10 +147,12 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #tb-t0 { left: 166px; padding-left: 4px; }
 #tb-t1 { left: 362px; }
 #tb-t2 { left: 558px; }
+#tb-t3 { left: 754px; }
 #tb-arrow { left: 763px; top: 10px; width: 10px; height: 16px; filter: drop-shadow(1.5px 1.5px 0 #000); }
+#stage.wide #tb-arrow { left: 959px; }
 
 /* ------------------------------------------------------------------ grid */
-#grid { position: absolute; left: 0; top: 293px; width: 800px; height: 219px; }
+#grid { position: absolute; left: 0; top: 293px; width: var(--W); height: 219px; }
 #chans {
   position: absolute; left: 0; top: 0; width: 156px; height: 219px;
   background: #184359;
@@ -206,7 +214,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 .cell.sel span { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; font-size: 24.5px; letter-spacing: .3px; }
 
 #footer {
-  position: absolute; left: 0; top: 512px; width: 800px; height: 88px;
+  position: absolute; left: 0; top: 512px; width: var(--W); height: 88px;
   background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
   border-top: 1px solid #7f8796;
 }
@@ -260,15 +268,15 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #b-top > div { position: absolute; top: 6px; font-size: 26.5px; line-height: 28px; text-shadow: var(--shadow); white-space: nowrap; }
 #b-title { left: 58px; max-width: 440px; overflow: hidden; color: var(--lime); }
 #b-chan  { right: 182px; max-width: 300px; overflow: hidden; }
-#b-sep   { left: 622px; top: 9px !important; width: 2px; height: 23px; background: #a8c3e6; opacity: .8; }
-#b-clock { left: 648px; }
+#b-sep   { left: calc(100% - 170px); top: 9px !important; width: 2px; height: 23px; background: #a8c3e6; opacity: .8; }
+#b-clock { left: calc(100% - 144px); }
 #b-body {
   position: absolute; left: 0; right: 0; top: 40px; bottom: 0;
   background: linear-gradient(#042548, #00264f 6%, #00264d);
 }
 #b-body > div { position: absolute; left: 58px; font-size: 26.5px; line-height: 31px; text-shadow: var(--shadow); white-space: nowrap; }
 #b-time { top: 8px; }
-#b-desc { top: 39px; width: 680px; overflow: hidden; }
+#b-desc { top: 39px; right: 54px; overflow: hidden; }
 
 #osd-num {
   position: absolute; right: 56px; top: 36px;
@@ -291,7 +299,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
    guide's channel column beside its listings), info panel, key hints. */
 #menu { background: #000; }
 #m-hdr {
-  position: absolute; left: 0; top: 0; width: 800px; height: 96px;
+  position: absolute; left: 0; top: 0; width: var(--W); height: 96px;
   background: linear-gradient(#21486f, #1f456b 40%, #1d4268);
   border-bottom: 1px solid #13183a;
 }
@@ -304,7 +312,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #m-clock { top: 55px; }
 
 #m-bar {
-  position: absolute; left: 0; top: 96px; width: 800px; height: 40px;
+  position: absolute; left: 0; top: 96px; width: var(--W); height: 40px;
   border-top: 4px solid #111230;
   background: linear-gradient(#173f6b, #143d69);
 }
@@ -314,7 +322,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #m-title { left: 100px; }
 #m-pos { right: 24px; }
 
-#m-body { position: absolute; left: 0; top: 136px; width: 800px; height: 312px; background: #969695; overflow: hidden; }
+#m-body { position: absolute; left: 0; top: 136px; width: var(--W); height: 312px; background: #969695; overflow: hidden; }
 #m-cats { position: absolute; left: 0; top: 0; width: 200px; bottom: 0; background: #184359; }
 .m-cat {
   position: absolute; left: 0; width: 200px; height: 42px; cursor: pointer;
@@ -352,7 +360,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 .m-row.moving .m-text, .m-row.moving .m-num, .m-row.moving .m-tag { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
 
 #m-info {
-  position: absolute; left: 0; top: 448px; width: 800px; height: 116px;
+  position: absolute; left: 0; top: 448px; width: var(--W); height: 116px;
   border-top: 4px solid #111230;
   background: linear-gradient(#131732 0%, #1f2a4e 30%, #33486d 55%, #52668a 80%, #6c7d97 100%);
 }
@@ -360,19 +368,19 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #m-info > #mi-title { left: 56px; top: 4px; max-width: 480px; overflow: hidden; color: var(--lime); font-size: 27px; }
 #mi-chan { right: 24px; top: 4px; max-width: 300px; overflow: hidden; }
 #m-info > #mi-desc {
-  left: 56px; top: 34px; width: 720px; height: 76px; white-space: normal;
+  left: 56px; top: 34px; right: 24px; height: 76px; white-space: normal;
   overflow: hidden; font-size: 24px; line-height: 25.5px;
 }
 
 #m-foot {
-  position: absolute; left: 0; top: 564px; width: 800px; height: 36px;
+  position: absolute; left: 0; top: 564px; width: var(--W); height: 36px;
   background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
   border-top: 1px solid #7f8796;
 }
 #m-hint { position: absolute; left: 56px; top: 5px; font-size: 21px; line-height: 26px; white-space: nowrap; text-shadow: var(--shadow); color: #c3cde0; }
 
 /* ------------------------------------------------- progress / trick bar */
-#pbar { position: absolute; left: 40px; top: 404px; width: 720px; height: 152px; display: none; }
+#pbar { position: absolute; left: 40px; right: 40px; top: 404px; height: 152px; display: none; }
 #stage.watching #pbar.show { display: block; }
 #pb-ctl {
   position: absolute; right: 10px; top: 0; height: 39px; display: flex; padding: 0 4px;
@@ -393,21 +401,21 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #pbar.focus-bar #pb-mark { top: -4px; width: 5px; height: 30px; margin-left: -2.5px; background: var(--lime); }
 #pbar.focus-bar #pb-tab { border-color: var(--lime); box-shadow: 0 0 0 2px var(--lime); clip-path: inset(0 -3px -3px -3px); }
 #pb-top {
-  position: absolute; left: 0; top: 38px; width: 720px; height: 36px; border-radius: 6px;
+  position: absolute; left: 0; right: 0; top: 38px; height: 36px; border-radius: 6px;
   background: linear-gradient(#0b2f66, #04204d); border: 1px solid #021634;
 }
 #pb-top > div { position: absolute; top: 3px; font-size: 26px; line-height: 28px; white-space: nowrap; overflow: hidden; text-shadow: var(--shadow); }
 #pb-title { left: 15px; color: #f4ec8a; }
 #pb-chan { right: 15px; max-width: 280px; }
 #pb-bar {
-  position: absolute; left: 0; top: 74px; width: 720px; height: 36px; border-radius: 6px;
+  position: absolute; left: 0; right: 0; top: 74px; height: 36px; border-radius: 6px;
   background: linear-gradient(#4f82c4, #1f4f92); border: 1px solid #0b2c5c;
   box-shadow: inset 0 1px 0 rgba(169,200,239,.6);
 }
 #pb-left, #pb-right { position: absolute; top: 3px; width: 96px; font-size: 25px; line-height: 28px; white-space: nowrap; text-shadow: var(--shadow); }
 #pb-left { left: 10px; }
 #pb-right { right: 10px; text-align: right; }
-#pb-track { position: absolute; left: 112px; width: 494px; top: 6px; height: 22px; background: #000; border-radius: 2px; cursor: pointer; }
+#pb-track { position: absolute; left: 112px; right: 114px; top: 6px; height: 22px; background: #000; border-radius: 2px; cursor: pointer; }
 #pb-fill { position: absolute; left: 1px; top: 1px; bottom: 1px; max-width: calc(100% - 2px); background: linear-gradient(#0a7d0a, #016601); }
 #pb-mark { position: absolute; top: -2px; width: 3px; height: 26px; margin-left: -1.5px; background: #fff; box-shadow: 1px 1px 1px rgba(0,0,0,.6); }
 #pb-tab {
@@ -427,7 +435,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 
 /* ---------------------------------------------------------------- osd */
 #osd {
-  position: absolute; left: 40px; top: 32px; max-width: 720px; padding: 5px 16px;
+  position: absolute; left: 40px; top: 32px; max-width: calc(var(--W) - 80px); padding: 5px 16px;
   display: none; z-index: 15;
   background: linear-gradient(#0b2f66, #04204d); border: 1px solid #5d82b8; border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0,0,0,.5);
@@ -435,13 +443,13 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 }
 #osd.show { display: block; }
 #stage.in-menu #osd { left: auto; right: 20px; top: auto; bottom: 44px; max-width: 420px; font-size: 20px; line-height: 24px; }
-#stage:not(.watching):not(.in-menu) #osd { left: 476px; top: auto; bottom: 356px; max-width: 312px; font-size: 20px; line-height: 24px; }
+#stage:not(.watching):not(.in-menu) #osd { left: calc(var(--W) - var(--pip) + 12px); top: auto; bottom: 356px; max-width: calc(var(--pip) - 24px); font-size: 20px; line-height: 24px; }
 
 /* -------------------------------------------------------------- dialog */
 #dlg { position: absolute; inset: 0; display: none; z-index: 20; background: rgba(0,0,12,.5); }
 #dlg.show { display: block; }
 #dlg-box {
-  position: absolute; left: 110px; top: 50%; width: 580px; transform: translateY(-50%);
+  position: absolute; left: 50%; top: 50%; width: 580px; transform: translate(-50%, -50%);
   max-height: 560px; overflow: hidden; border-radius: 8px;
   border: 1px solid #a9c8ef; box-shadow: 0 8px 30px rgba(0,0,0,.7);
   background: linear-gradient(#0b2f66, #04204d);
@@ -476,7 +484,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 /* Subtitle Options / Display Options: a panel at the top right of the
    picture, which keeps playing underneath. */
 #pnl {
-  position: absolute; left: 436px; top: 32px; width: 332px;
+  position: absolute; right: 32px; top: 32px; width: 332px;
   display: none; z-index: 14; overflow: hidden;
   border-radius: 8px; border: 1px solid #a9c8ef; box-shadow: 0 6px 24px rgba(0,0,0,.7);
   background: linear-gradient(#0b2f66, #04204d);

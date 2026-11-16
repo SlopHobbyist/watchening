@@ -34,11 +34,16 @@
   const ROWS = 4;
   const ROW_TOP = [2, 56, 111, 165]; // row offsets inside #grid
   const GAP = 3;                     // gap between listings
-  const NAV_SPAN = 3 * SLOT;         // the three visible columns are navigable
+  const PROGS_X = 164;               // left edge of the listings
   const DAY = 24 * 60 * MIN;
   const DAYS_BACK = 1, DAYS_AHEAD = 8;
 
   const stage = $("stage"), tv = $("tv");
+  /** Stage width: 800, or 1067 in 16:9 mode (set by the .wide class, see style.css). */
+  const stageW = () => stage.offsetWidth;
+  /** Whole half-hour columns on screen (3, or 4 in 16:9 mode): the navigable span. */
+  const cols = () => Math.floor((stageW() - PROGS_X) / SLOT_PX);
+  const navSpan = () => cols() * SLOT;
 
   const App = (window.App = {
     all: [],           // every channel from enabled playlists, in channel order
@@ -111,7 +116,7 @@
   const els = {
     clock: $("clock"), title: $("i-title"), chan: $("i-chan"), time: $("i-time"),
     icons: $("i-icons"), desc: $("i-desc"), day: $("tb-day"),
-    t: [$("tb-t0"), $("tb-t1"), $("tb-t2")], chans: $("chans"), progs: $("progs"), empty: $("empty"),
+    t: [$("tb-t0"), $("tb-t1"), $("tb-t2"), $("tb-t3")], chans: $("chans"), progs: $("progs"), empty: $("empty"),
   };
 
   /*
@@ -164,7 +169,7 @@
   App.showInfo = function ({ title = "", chan = "", time = "", icons = "", desc = "" }) {
     els.chan.textContent = chan;
     fitText(els.chan, chan, true);
-    els.title.style.maxWidth = Math.max(120, 464 - 55 - 11 - els.chan.offsetWidth - 14) + "px";
+    els.title.style.maxWidth = Math.max(120, $("info").offsetWidth - 55 - 11 - els.chan.offsetWidth - 14) + "px";
     fitText(els.title, title, true);
     els.time.textContent = time;
     els.icons.innerHTML = icons;
@@ -247,7 +252,8 @@
     }
     els.empty.classList.remove("show");
 
-    const visEnd = ws + ((800 - 164) / SLOT_PX) * SLOT;
+    const W = stageW();
+    const visEnd = ws + ((W - PROGS_X) / SLOT_PX) * SLOT;
     const sel = programAt(App.channels[S.sel], S.focus);
     const chanFrag = document.createDocumentFragment();
     const progFrag = document.createDocumentFragment();
@@ -261,7 +267,7 @@
       for (const p of programsIn(ch, ws, visEnd)) {
         const x0 = ((Math.max(p.start, ws) - ws) / SLOT) * SLOT_PX;
         const x1 = ((Math.min(p.end, horizon) - ws) / SLOT) * SLOT_PX - GAP;
-        const w = Math.min(x1, 800) - x0;
+        const w = Math.min(x1, W) - x0;
         if (w <= 0) continue;
         const isSel = idx === S.sel && same(p, sel);
         const cell = document.createElement("div");
@@ -271,7 +277,7 @@
         cell.style.top = ROW_TOP[row] + "px";
         if (w > 72) {
           const span = document.createElement("span");
-          span.style.maxWidth = Math.max(0, Math.min(x1, 636) - x0 - 13) + "px";
+          span.style.maxWidth = Math.max(0, Math.min(x1, W - PROGS_X) - x0 - 13) + "px";
           cell.appendChild(span);
           cellsToFit.push([span, p.year && p.cat === "movie" ? `${p.title} (${p.year})` : p.title]);
         }
@@ -298,7 +304,7 @@
 
   // -------------------------------------------------------------- navigation
   function clampWs() {
-    S.ws = Math.max(nowSlot(), Math.min(S.ws, horizon - 4 * SLOT));
+    S.ws = Math.max(nowSlot(), Math.min(S.ws, horizon - (cols() + 1) * SLOT));
   }
   function select(idx, focus) {
     S.sel = idx;
@@ -329,7 +335,7 @@
     const p = programAt(ch, S.focus);
     if (p.end >= horizon) return;
     const next = programAt(ch, p.end);
-    while (next.start >= S.ws + NAV_SPAN) S.ws += SLOT;
+    while (next.start >= S.ws + navSpan()) S.ws += SLOT;
     clampWs();
     S.focus = Math.max(next.start, S.ws);
     renderGrid();
@@ -358,7 +364,7 @@
   function shiftDay(d) {
     S.ws += d * DAY;
     clampWs();
-    S.focus = Math.max(S.ws, Math.min(S.focus + d * DAY, S.ws + NAV_SPAN - 1));
+    S.focus = Math.max(S.ws, Math.min(S.focus + d * DAY, S.ws + navSpan() - 1));
     renderGrid();
   }
 
@@ -495,7 +501,7 @@
     renderClock();
     $("banner").classList.add("show");
     fitText(chanEl, `${ch.n} ${ch.call}`, true);
-    titleEl.style.maxWidth = Math.max(160, 792 - 182 - chanEl.offsetWidth - 58 - 18) + "px";
+    titleEl.style.maxWidth = Math.max(160, $("banner").offsetWidth - 182 - chanEl.offsetWidth - 58 - 18) + "px";
     fitText(titleEl, p.empty ? ch.name : p.title, true);
     $("b-time").textContent = Player.error ? "No Signal" : p.none ? ch.group || "Live" : U.fmtRange(p.start, p.end);
     const desc = Player.error
@@ -652,7 +658,7 @@
     const now = Date.now();
     const p = programAt(ch, now);
     fitText(pb.chan, `${ch.n} ${ch.call}`, true);
-    pb.title.style.maxWidth = Math.max(160, 720 - 30 - pb.chan.offsetWidth - 20) + "px";
+    pb.title.style.maxWidth = Math.max(160, pb.root.offsetWidth - 30 - pb.chan.offsetWidth - 20) + "px";
     fitText(pb.title, p.empty ? ch.name : p.title, true);
 
     const r = Player.range();
@@ -687,7 +693,7 @@
     // tab hangs under the marker, kept inside the bar
     const trackX = pb.track.offsetLeft, trackW = pb.track.offsetWidth;
     const tabW = pb.tab.offsetWidth;
-    pb.tab.style.left = U.clamp(trackX + frac * trackW - tabW / 2, 0, 720 - tabW) + "px";
+    pb.tab.style.left = U.clamp(trackX + frac * trackW - tabW / 2, 0, pb.root.offsetWidth - tabW) + "px";
 
     pb.root.querySelector('[data-act="subs"]').classList.toggle("on", !!Player.cc);
     renderCtl();
@@ -1103,9 +1109,15 @@
    */
   /** How wide a pixel shows up on the TV, as a fraction of its height. */
   function squish() { return Store.cfg.prefs.squish ? 3 / 4 : 1; }
+  /*
+   * 16:9 mode: for a widescreen display shown as it is. The stage is 1067
+   * wide instead of 800 (see style.css): the header and info panel widen,
+   * the picture-in-picture is 16:9 and the guide reaches a half hour further.
+   */
   function fit() {
+    stage.classList.toggle("wide", !!Store.cfg.prefs.wide);
     const k = squish();
-    const s = Math.min((window.innerWidth * k) / 800, window.innerHeight / 600);
+    const s = Math.min((window.innerWidth * k) / stageW(), window.innerHeight / 600);
     stage.style.setProperty("--sx", s / k);
     stage.style.setProperty("--sy", s);
     layoutTv();
@@ -1370,7 +1382,7 @@
     Store.save();
     Player.ccDefault = !!Store.cfg.prefs.ccDefault;
     Player.setCCSize(Store.cfg.prefs.ccSize);
-    if ("squish" in patch) fit();
+    if ("squish" in patch || "wide" in patch) fit();
   };
 
   // ------------------------------------------------------------------- clock

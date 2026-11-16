@@ -9,7 +9,7 @@
 <body>
 
 <!-- ===================== TV / VIDEO =====================
-     Lives outside the 800x600 stage so it can fill the whole window while
+     Lives outside the 800x600 (16:9 mode: 1067x600) stage so it can fill the whole window while
      watching. In the guide and settings it is positioned over #pipslot. -->
 <div id="tv" class="pip">
   <canvas id="tv-canvas" width="400" height="300"></canvas>
@@ -60,6 +60,8 @@
       <div class="tb-sep" style="left:558px"></div>
       <div class="tb-time" id="tb-t2"></div>
       <div class="tb-sep" style="left:754px"></div>
+      <div class="tb-time wide-only" id="tb-t3"></div>
+      <div class="tb-sep wide-only" style="left:950px"></div>
       <svg id="tb-arrow" viewBox="0 0 10 16" aria-hidden="true"><path d="M1,1 L9,8 L1,15 Z" fill="#fff"/></svg>
     </div>
 

@@ -6,7 +6,7 @@
  *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
- *   Options    subtitle defaults, channel icons, squish mode, CORS proxy, erase everything
+ *   Options    subtitle defaults, channel icons, 16:9 mode, squish mode, CORS proxy, erase everything
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
  *       Left (A) / Back / Esc / Backspace back out · Back in the categories (or F1) closes
@@ -17,7 +17,7 @@
   const PAGES = [
     { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
-    { name: "Options", desc: "Subtitles, channel icons, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
+    { name: "Options", desc: "Subtitles, channel icons, 16:9 mode for widescreen TVs, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
   ];
   const VIS = 7;          // visible rows
   const PITCH = 44;       // row height + gap
@@ -143,6 +143,11 @@
         act: () => { App.setPrefs({ chanIcons: p.chanIcons === false }); App.rebuild(); render(); },
       },
       {
+        text: "16:9 Mode (Widescreen TV)", tag: p.wide ? "On" : "Off",
+        info: { title: "16:9 Mode", desc: "For a widescreen TV or monitor. Widens the guide and its info panel to fill a 16:9 screen, shows a half hour more of the listings, and makes the guide's picture 16:9." },
+        act: () => { App.setPrefs({ wide: !p.wide }); render(); },
+      },
+      {
         text: "Squish Mode (4:3 TV)", tag: p.squish ? "On" : "Off",
         info: { title: "Squish Mode", desc: "For a 16:9 box whose converter squeezes the picture onto a 4:3 TV. Draws the guide and the picture wider so they look right on the TV." },
         act: () => { App.setPrefs({ squish: !p.squish }); render(); },
@@ -182,7 +187,7 @@
   function showInfo({ title = "", chan = "", desc = "" }) {
     const chanEl = $("mi-chan"), titleEl = $("mi-title");
     U.fitText(chanEl, chan, true);
-    titleEl.style.maxWidth = Math.max(200, 800 - 56 - 24 - chanEl.offsetWidth - 20) + "px";
+    titleEl.style.maxWidth = Math.max(200, $("m-info").offsetWidth - 56 - 24 - chanEl.offsetWidth - 20) + "px";
     U.fitText(titleEl, title, true);
     U.fitText($("mi-desc"), desc, false);
   }
