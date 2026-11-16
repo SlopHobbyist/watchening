@@ -3,7 +3,7 @@
  *
  * Everything works from a TV remote's D-pad, OK and Back alone:
  *   watching        Up / Down channel · Left / Right back / ahead 5s
- *                   OK opens the controls · Back closes them, else opens the guide
+ *                   OK opens the controls · Back hides the info / controls, else opens the guide
  *   controls        Up / Down: the timeline or the row of buttons
  *                   timeline: Left / Right back / ahead 10s (held: 30s) · OK pause
  *                   buttons: Left / Right pick · OK press · Back closes
@@ -11,7 +11,7 @@
  *
  * Keys (watching): also W / S channel · A / D 5s · J ahead 10s · L back 10s · 0-9 tune
  *                  Space / K play/pause · C captions on/off · Shift+C subtitle options
- *                  Shift+F screen options · M mute · F full screen · G guide
+ *                  Shift+F display options · M mute · F full screen · G guide
  *                  I info · P controls
  *                  Esc / Backspace work as Back
  *                  (also: PgUp/PgDn channel,
@@ -518,10 +518,10 @@
     tv.classList.toggle("lift-p", p && !b);
     tv.classList.toggle("lift-bp", b && p);
   }
-  /** Back while watching: close the controls; without them, the guide.
-   *  (The info banner never holds Back up: it goes away by itself.) */
+  /** Back while watching: hide the info banner / controls; with neither
+   *  showing, the guide. */
   function back() {
-    if (pbarShown()) { hideBanner(); hidePbar(); }
+    if (bannerShown() || pbarShown()) { hideBanner(); hidePbar(); }
     else App.openGuide();
   }
 
@@ -529,7 +529,7 @@
   const pb = {
     root: $("pbar"), title: $("pb-title"), chan: $("pb-chan"), left: $("pb-left"), right: $("pb-right"),
     track: $("pb-track"), fill: $("pb-fill"), mark: $("pb-mark"), tab: $("pb-tab"), pos: $("pb-pos"),
-    state: $("pb-state").firstElementChild, playIcon: $("pb-play-icon"),
+    state: $("pb-state").firstElementChild,
   };
   const ICON = {
     play: "M7,1 L19,8 L7,15 Z",
@@ -550,40 +550,24 @@
   const BTNS = Array.from(pb.root.querySelectorAll(".pb-btn"));
   const ctl = { on: false, row: "bar", btn: 0 };
   const btnIdx = (a) => Math.max(0, BTNS.findIndex((b) => b.dataset.act === a));
-  function btnOk(b) {
-    const a = b && b.dataset.act;
-    if (a === "play") return Player.canPause();
-    if (a === "rew" || a === "ff") return !!Player.range();
-    return !!b;
-  }
   /** Open the controls with focus; `act` focuses that button. */
   function openCtl(act) {
     if (App.mode !== "watch" || !tunedCh()) return;
     if (!ctl.on || act) {
       ctl.on = true;
       ctl.row = Player.range() && !act ? "bar" : "btns";
-      ctl.btn = btnIdx(act || "play");
+      ctl.btn = act ? btnIdx(act) : 0;
     }
     if (!bannerHold) hideBanner(); // the bar would jump when it timed out
     showPbar(CTL_MS);
   }
   function moveBtn(d) {
-    for (let i = ctl.btn + d; i >= 0 && i < BTNS.length; i += d) {
-      if (btnOk(BTNS[i])) { ctl.btn = i; break; }
-    }
+    ctl.btn = U.clamp(ctl.btn + d, 0, BTNS.length - 1);
     renderCtl();
   }
   function renderCtl() {
     const on = ctl.on && pbarShown();
-    if (on) {
-      if (ctl.row === "bar" && !Player.range()) ctl.row = "btns";
-      if (!btnOk(BTNS[ctl.btn])) {
-        // nearest usable button, else the first
-        let best = -1;
-        BTNS.forEach((b, i) => { if (btnOk(b) && (best < 0 || Math.abs(i - ctl.btn) < Math.abs(best - ctl.btn))) best = i; });
-        ctl.btn = Math.max(0, best);
-      }
-    }
+    if (on && ctl.row === "bar" && !Player.range()) ctl.row = "btns";
     pb.root.classList.toggle("focus-bar", on && ctl.row === "bar");
     BTNS.forEach((b, i) => b.classList.toggle("focus", on && ctl.row === "btns" && i === ctl.btn));
   }
@@ -600,8 +584,7 @@
       if (nav === "down" && Player.range()) ctl.row = "bar";
       else if (nav === "left" || nav === "right") moveBtn(nav === "left" ? -1 : 1);
       else if (nav === "ok") {
-        const b = BTNS[ctl.btn];
-        if (btnOk(b)) act[b.dataset.act]({ fromCtl: true });
+        act[BTNS[ctl.btn].dataset.act]({ fromCtl: true });
       }
     }
     renderCtl();
@@ -694,17 +677,13 @@
     if (Player.paused() && Player.canPause()) state = "pause";
     if (flash.until > now) state = flash.dir < 0 ? "rew" : "ff";
     pb.state.setAttribute("d", Player.canPause() ? ICON[state] : "");
-    pb.playIcon.setAttribute("d", Player.paused() ? ICON.play : ICON.pause);
 
     // tab hangs under the marker, kept inside the bar
     const trackX = pb.track.offsetLeft, trackW = pb.track.offsetWidth;
     const tabW = pb.tab.offsetWidth;
     pb.tab.style.left = U.clamp(trackX + frac * trackW - tabW / 2, 0, 720 - tabW) + "px";
 
-    pb.root.classList.toggle("seekable", !!r);
-    pb.root.querySelector('[data-act="play"]').classList.toggle("disabled", !Player.canPause());
-    pb.root.querySelector('[data-act="cc"]').classList.toggle("on", !!Player.cc);
-    pb.root.querySelector('[data-act="info"]').classList.toggle("on", bannerShown());
+    pb.root.querySelector('[data-act="subs"]').classList.toggle("on", !!Player.cc);
     renderCtl();
   }
 
@@ -879,7 +858,7 @@
 
   const PANELS = {
     subs: { title: "Subtitle Options", rows: subtitleRows },
-    screen: { title: "Screen Options", rows: screenRows },
+    screen: { title: "Display Options", rows: screenRows },
   };
   function togglePanel(id, fromCtl) {
     if (Panel.id() === id) return Panel.close();

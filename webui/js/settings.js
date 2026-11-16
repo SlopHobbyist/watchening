@@ -574,7 +574,7 @@
         "Controls: ▲▼ timeline or buttons · ◀▶ seek or pick",
         "Keys: W S channel · A D 5s · J L 10s · 0-9 tune",
         "Space or K pause · C captions · M mute · F full screen",
-        "I info · G guide · Shift+C subtitles · Shift+F screen",
+        "I info · G guide · Shift+C subtitles · Shift+F display",
         "Menus: arrows · OK or Enter · Back, Esc or Backspace",
         "F1 settings, anywhere",
       ].join("\n"),

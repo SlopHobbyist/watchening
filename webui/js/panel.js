@@ -1,5 +1,5 @@
 /*
- * Pop-out options over the picture (Subtitle Options, Screen Options): a
+ * Pop-out options over the picture (Subtitle Options, Display Options): a
  * title strip, a list of rows, a description of the selected row and a key
  * hint. The picture keeps playing underneath.
  *
