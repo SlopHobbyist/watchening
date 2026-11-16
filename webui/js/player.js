@@ -5,6 +5,8 @@
  *   MPEG-TS / FLV    mpegts.js (loaded on demand)
  *   MP4/WebM/MP3...  the <video> element directly
  *   unknown          tries native, then HLS, then MPEG-TS
+ *   embed            zlive channels: the provider's own player in an iframe
+ *                    (live only: no pause, seeking or subtitles; mute reloads it)
  *
  * The two playback libraries are fetched only when a stream needs them, from
  * jsDelivr, or from js/vendor/ if that fails (drop copies there for offline use).
@@ -51,7 +53,8 @@
 
   const P = (window.Player = {
     ch: null,
-    how: "",          // native | hls | ts | flv
+    how: "",          // native | hls | ts | flv | embed
+    frame: null,      // the <iframe> playing an embed channel
     live: false,
     loading: false,
     error: "",
@@ -156,9 +159,46 @@
     if (!P.autoMuted) return;
     P.autoMuted = false;
     video.muted = false;
-    if (P.ch && !P.error) video.play().catch(() => {});
+    if (P.frame) P.load(P.ch, true); // an embed only takes sound when it loads
+    else if (P.ch && !P.error) video.play().catch(() => {});
     emit("unmuted");
   };
+
+  /*
+   * Embed channels. The provider's player is cross-origin and has no
+   * scripting API, so all we see is its page loading; it reports its own
+   * problems (an offline channel, say) inside the picture. The sandbox lets
+   * it run its player but not open pop-ups or navigate this page. Each tune
+   * gets a fresh iframe, so channel changes don't pile up in the history.
+   */
+  function startEmbed(ch, my) {
+    // Before any click or key press the browser only allows muted autoplay,
+    // and the player can't be unmuted from outside: start it muted and load
+    // it again with sound on the first gesture (see unlock).
+    const ua = navigator.userActivation;
+    if (ua && !ua.hasBeenActive && !video.muted) {
+      video.muted = true;
+      P.autoMuted = true;
+      emit("muted");
+    }
+    const f = document.createElement("iframe");
+    f.title = ch.name;
+    f.tabIndex = -1;
+    f.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+    f.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    f.addEventListener("load", () => {
+      if (P.frame !== f || my !== P.token) return;
+      P.loading = false;
+      emit("state");
+    }, { once: true });
+    setTimeout(() => { if (P.frame === f && my === P.token && P.loading) fail("The channel's player didn't respond"); }, 30000);
+    f.src = Zlive.embedUrl(ch.url, video.muted);
+    P.frame = f;
+    P.how = "embed";
+    P.live = true;
+    tv.insertBefore(f, ccEl);
+    layoutVideo();
+  }
 
   function teardown() {
     if (P.hls) { try { P.hls.destroy(); } catch { /* */ } P.hls = null; }
@@ -171,6 +211,7 @@
       video.removeAttribute("src");
       try { video.load(); } catch { /* */ }
     }
+    if (P.frame) { P.frame.remove(); P.frame = null; }
     P.live = false;
     P.how = "";
   }
@@ -278,6 +319,7 @@
     }
     P.loading = true;
     emit("state");
+    if (ch.embed) return startEmbed(ch, my);
     const url = await resolveUrl(ch.url);
     if (my !== P.token) return;
     const k = kind(url);
@@ -430,7 +472,7 @@
   };
   P.time = () => video.currentTime;
   P.paused = () => video.paused;
-  P.canPause = () => !!(P.ch && !P.error && !P.loading);
+  P.canPause = () => !!(P.ch && !P.error && !P.loading && !P.frame);
   P.togglePause = () => {
     if (!P.canPause()) return null;
     if (video.paused) { play(); return "play"; }
@@ -452,7 +494,8 @@
   };
   P.toggleMute = () => {
     P.autoMuted = false;
-    video.muted = !video.muted;
+    video.muted = !video.muted; // also the mute setting for embed channels
+    if (P.frame) P.load(P.ch, true);
     return video.muted;
   };
 
@@ -619,15 +662,21 @@
   };
   P.videoSize = () => (video.videoWidth && video.videoHeight ? { w: video.videoWidth, h: video.videoHeight } : null);
 
+  const BOX = ["left", "top", "width", "height", "right", "bottom", "objectFit", "clipPath"];
   function layoutVideo() {
-    const st = video.style;
+    // An embed's player stretches its picture over the whole iframe, so the
+    // iframe is always laid out as the picture, taken to be 16:9 (we can't
+    // see its real size). In the guide it fills the frame, like the video.
+    const el = P.frame || video;
+    const st = el.style;
+    if (P.frame) for (const k of BOX) video.style[k] = "";
     const W = tv.clientWidth, H = tv.clientHeight;
-    const sc = P.screen;
-    const src = P.videoSize();
+    const sc = P.frame && !fullView ? { aspect: "auto", scale: "zoom", crop: "off", overscan: 0 } : P.screen;
+    const src = P.frame ? { w: 16, h: 9 } : P.videoSize();
     const a = sc.aspect === "16:9" ? 16 / 9 : sc.aspect === "4:3" ? 4 / 3 : src ? src.w / src.h : 0;
     const plain = sc.aspect === "auto" && sc.scale === "fit" && sc.crop === "off" && !sc.overscan;
-    if (!fullView || !W || !H || !a || plain) {
-      for (const k of ["left", "top", "width", "height", "right", "bottom", "objectFit", "clipPath"]) st[k] = "";
+    if (!W || !H || !a || (!P.frame && (!fullView || plain))) {
+      for (const k of BOX) st[k] = "";
       return;
     }
     let fx = 1, fy = 1; // fraction of the width / height kept

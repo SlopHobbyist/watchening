@@ -956,8 +956,8 @@
         seen.add(key);
         list.push({
           key, url: c.url, name: c.name, call: U.shortName(c.name), logo: c.logo, group: c.group,
-          tvgId: c.tvgId, tvgName: c.tvgName, plId: pl.id, plName: pl.name,
-          hd: /\b(HD|FHD|UHD|4K|1080[pi]?|720p)\b/i.test(c.name), sched: [], nat: list.length,
+          tvgId: c.tvgId, tvgName: c.tvgName, plId: pl.id, plName: pl.name, embed: !!c.embed,
+          hd: !!c.hd || /\b(HD|FHD|UHD|4K|1080[pi]?|720p)\b/i.test(c.name), sched: [], nat: list.length,
         });
       }
     }
@@ -995,12 +995,20 @@
   App.refreshViews = refreshViews;
 
   // ---------------------------------------------------------- data: playlists
+  /** Playlists downloaded from the web (refreshed hourly): M3U addresses and zlive. */
+  const isWeb = (pl) => pl.type === "url" || pl.type === "zlive";
+  App.isWeb = isWeb;
+
   /** Read (and with `refresh`, re-download) one playlist into App.data. */
   App.loadPlaylist = async function (pl, refresh) {
+    const zl = pl.type === "zlive";
     let text = null;
-    if (pl.type === "url" && refresh) {
+    if (isWeb(pl) && refresh) {
       try {
-        text = await U.fetchText(pl.url, Store.cfg.prefs.proxy);
+        // zlive's list is open to web pages, so it never needs the proxy
+        const got = await U.fetchText(pl.url, zl ? "" : Store.cfg.prefs.proxy);
+        if (zl) Zlive.parse(got); // keep the saved copy if this one is broken
+        text = got;
         await Store.put("pl:" + pl.id, text);
         pl.updated = Date.now();
         pl.error = "";
@@ -1014,7 +1022,10 @@
       App.data.delete(pl.id);
       return null;
     }
-    let parsed = M3U.parse(text, pl.type === "url" ? pl.url : "");
+    let parsed;
+    if (zl) {
+      try { parsed = Zlive.parse(text); } catch (e) { pl.error = e.message; App.data.delete(pl.id); return null; }
+    } else parsed = M3U.parse(text, pl.type === "url" ? pl.url : "");
     if (parsed.isStream) {
       // a single HLS stream added by URL: treat it as a one-channel playlist
       parsed = { channels: [{ name: pl.name, url: pl.url, tvgId: "", tvgName: "", logo: "", group: "" }], epg: [] };
@@ -1084,8 +1095,36 @@
     App.loadGuideData(false);
   };
 
+  /** The zlive channel source (a playlist of type "zlive"), if ever turned on. */
+  App.zlive = () => Store.cfg.playlists.find((p) => p.type === "zlive") || null;
+
+  /** Turn zlive's channels on (downloading its list) or off. Turning off
+   *  keeps the list, channel order and hidden channels for next time. */
+  App.setZlive = async function (on) {
+    let pl = App.zlive();
+    if (!on) {
+      if (pl) pl.enabled = false;
+    } else if (pl) {
+      pl.enabled = true;
+      if (!App.data.has(pl.id) || !pl.updated || Date.now() - pl.updated > 3600e3) await App.loadPlaylist(pl, true);
+      if (!App.data.has(pl.id)) { pl.enabled = false; throw new Error(pl.error || "Couldn't download zlive's channel list"); }
+    } else {
+      pl = {
+        id: "zlive", name: "zlive.st", type: "zlive", url: Zlive.MANIFEST,
+        enabled: true, count: 0, updated: 0, error: "",
+      };
+      await App.loadPlaylist(pl, true);
+      if (!App.data.has(pl.id)) throw new Error(pl.error || "Couldn't download zlive's channel list");
+      Store.cfg.playlists.push(pl);
+    }
+    Store.save();
+    App.rebuild();
+    App.loadGuideData(false);
+    return pl;
+  };
+
   App.refreshAll = async function () {
-    const pls = Store.cfg.playlists.filter((p) => p.type === "url");
+    const pls = Store.cfg.playlists.filter(isWeb);
     await Promise.all(pls.map((p) => App.loadPlaylist(p, true)));
     Store.save();
     App.rebuild();
@@ -1194,7 +1233,7 @@
 
     // re-download web playlists that are more than an hour old
     const stale = Store.cfg.playlists.filter(
-      (pl) => pl.type === "url" && (!App.data.has(pl.id) || !pl.updated || Date.now() - pl.updated > 3600e3));
+      (pl) => isWeb(pl) && (pl.enabled || pl.type !== "zlive") && (!App.data.has(pl.id) || !pl.updated || Date.now() - pl.updated > 3600e3));
     if (stale.length) {
       await Promise.all(stale.map((pl) => App.loadPlaylist(pl, true)));
       Store.save();

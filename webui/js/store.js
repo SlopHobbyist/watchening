@@ -5,7 +5,8 @@
  *                  IPTV playlists easily outgrow localStorage's ~5MB.
  *
  * cfg = {
- *   playlists: [{ id, name, type: "url"|"file", url, enabled, count, updated, error }],
+ *   playlists: [{ id, name, type: "url"|"file"|"zlive", url, enabled, count, updated, error }],
+ *              (at most one "zlive": zlive.st's channels, see zlive.js)
  *   order:  [channel keys]   custom channel order (keys: "<playlist id>|<stream url>")
  *   hidden: [channel keys]
  *   prefs:  { epgUrl, ccDefault, ccSize, proxy }

@@ -221,6 +221,10 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #tv canvas { display: none; }
 #tv.nosignal canvas { display: block; }
 #tv.nosignal video { visibility: hidden; }
+/* zlive channels play in their own player. It never takes the mouse or the
+   keyboard, so clicks and keys keep working the same as on other channels. */
+#tv iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; pointer-events: none; }
+#tv.nosignal iframe { visibility: hidden; }
 
 /* closed captions: white Tiresias on black boxes (Tiresias was designed as a
    subtitle face). Sized from the picture height. */

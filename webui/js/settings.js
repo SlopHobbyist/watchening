@@ -3,8 +3,8 @@
  * left (like the guide's channel column) beside that category's rows, an
  * info panel describing the selection, and key hints.
  *
- *   Playlists  add by URL / upload file, refresh, turn off, rename, remove,
- *              guide data (XMLTV) address
+ *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
+ *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
  *   Options    subtitle defaults, CORS proxy, erase everything
  *
@@ -26,6 +26,30 @@
   const rowsEl = $("m-rows"), catsEl = $("m-cats");
 
   // -------------------------------------------------------------------- rows
+  /** Playlists the user added (zlive has a row of its own). */
+  const userPlaylists = () => Store.cfg.playlists.filter((p) => p.type !== "zlive");
+  const ZLIVE_ROW = 2; // its place in playlistRows; the user's playlists follow
+
+  function zliveRow() {
+    const pl = App.zlive();
+    const on = !!(pl && pl.enabled);
+    return {
+      text: "zlive.st Channels",
+      tag: !on ? "Off" : pl.error ? "Problem" : `${pl.count || 0} ch · On`,
+      cls: (on ? "" : "off") + (on && pl.error ? " warn" : ""),
+      info: {
+        title: "zlive.st Channels",
+        chan: on ? `${pl.count || 0} channels` : "Off",
+        desc: [
+          "Live TV and sports channels from zlive.st, added to your guide. They play in zlive's own player, so pause, rewind and subtitles aren't available on them",
+          on && pl.updated ? "Updated " + U.fmtDate(pl.updated) : "",
+          on && pl.error ? `Problem: ${pl.error}` : "",
+        ].filter(Boolean).join(". ") + ".",
+      },
+      act: zliveDialog,
+    };
+  }
+
   function playlistRows() {
     const cfg = Store.cfg;
     const out = [
@@ -39,8 +63,9 @@
         info: { title: "Upload Playlist File", desc: "Choose .m3u or .m3u8 files on this computer. You can also drag playlist files onto this window." },
         act: () => $("file-m3u").click(),
       },
+      zliveRow(),
     ];
-    for (const pl of cfg.playlists) {
+    for (const pl of userPlaylists()) {
       out.push({
         text: pl.name,
         tag: pl.error ? "Problem" : !pl.enabled ? "Off" : `${pl.count || 0} ch · ${pl.type === "url" ? "Web" : "File"}`,
@@ -154,7 +179,8 @@
 
   function pageInfo(i) {
     const cfg = Store.cfg;
-    const chan = i === 0 ? `${cfg.playlists.length} playlist${cfg.playlists.length === 1 ? "" : "s"}`
+    const npl = userPlaylists().length;
+    const chan = i === 0 ? `${npl} playlist${npl === 1 ? "" : "s"}`
       : i === 1 ? `${App.all.length} channel${App.all.length === 1 ? "" : "s"}` : "";
     return { title: PAGES[i].name, chan, desc: PAGES[i].desc };
   }
@@ -341,7 +367,7 @@
     if (!Player.ch && App.channels.length) App.tuneKey(App.channels[0].key);
     if (App.mode === "menu" && M.page === 0) {
       M.col = 1;
-      M.sel[0] = 2 + Store.cfg.playlists.indexOf(pls[pls.length - 1]);
+      M.sel[0] = ZLIVE_ROW + 1 + userPlaylists().indexOf(pls[pls.length - 1]);
       render();
     }
   }
@@ -385,6 +411,46 @@
         },
         { label: "Cancel" },
       ].filter(Boolean),
+    });
+  }
+
+  function zliveDialog() {
+    const pl = App.zlive();
+    const on = !!(pl && pl.enabled);
+    const turnOn = async () => {
+      Dialog.message("Downloading zlive's channel list...");
+      try {
+        const p = await App.setZlive(true);
+        App.osd(`zlive.st: ${p.count} channels`, 3500);
+        if (!Player.ch && App.channels.length) App.tuneKey(App.channels[0].key);
+        render();
+      } catch (e) {
+        Dialog.message(e.message, true);
+        return false;
+      }
+    };
+    Dialog.open({
+      title: "zlive.st Channels",
+      text: on
+        ? (pl.error ? `Problem: ${pl.error}\n` : "") + `${pl.count || 0} channels in your guide.`
+        : "Add zlive.st's free live TV and sports channels to your guide. They play in zlive's own player: pause, rewind and subtitles aren't available on them.",
+      buttons: on
+        ? [
+          {
+            label: "Download Again Now",
+            act: async () => {
+              Dialog.message("Downloading...");
+              await App.loadPlaylist(pl, true);
+              Store.save();
+              App.rebuild();
+              if (pl.error) { Dialog.message(pl.error, true); return false; }
+              App.osd(`zlive.st: ${pl.count} channels`);
+            },
+          },
+          { label: "Turn Off", act: () => { App.setZlive(false); render(); } },
+          { label: "Cancel" },
+        ]
+        : [{ label: "Turn On", act: turnOn }, { label: "Cancel" }],
     });
   }
 
