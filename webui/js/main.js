@@ -991,7 +991,7 @@
   };
 
   function attachGuide() {
-    for (const c of App.all) c.sched = XMLTV.lookup(App.guide, c) || [];
+    for (const c of App.all) c.sched = XMLTV.withKinds(XMLTV.lookup(App.guide, c) || [], c);
   }
 
   function refreshViews() {
