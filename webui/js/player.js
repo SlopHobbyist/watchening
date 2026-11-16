@@ -646,15 +646,23 @@
    *   crop      off | sides | tb    sides: keep the middle 4:3 of a wider picture
    *                                 (4:3 shows sent letterboxed in 16:9);
    *                                 tb: keep the middle 16:9 of a taller one
-   *   overscan  -50-50              percent trimmed off the width and height;
-   *                                 below 0, underscan: the picture is shrunk
-   *                                 by that percent, black border around it
    *   scale     fit | stretch | zoom  what's left: whole with black bars /
    *                                 stretched to the screen / filling it, edges cut
+   *   overscan  -50-50              percent of the width and height pushed
+   *                                 off the edges (the picture grows to match);
+   *                                 below 0, underscan: the picture is shrunk
+   *                                 by that percent, black border around it
+   *   splitScan, overscanY          when splitScan is on, overscan is for the
+   *                                 width only and overscanY for the height
    * The <video> box is sized so the kept part lands where it should, and
    * clip-path hides the cropped part.
    */
-  P.SCREEN_DEFAULT = { aspect: "auto", scale: "fit", crop: "off", overscan: 0 };
+  P.SCREEN_DEFAULT = { aspect: "auto", scale: "fit", crop: "off", overscan: 0, splitScan: false, overscanY: 0 };
+  /** [width, height] overscan in percent, -50 to 50. */
+  P.overscanXY = (sc) => {
+    const x = U.clamp(sc.overscan || 0, -50, 50);
+    return [x, sc.splitScan ? U.clamp(sc.overscanY || 0, -50, 50) : x];
+  };
   P.screen = Object.assign({}, P.SCREEN_DEFAULT);
   let fullView = false;
   P.setScreen = (s) => {
@@ -667,11 +675,11 @@
   };
   P.videoSize = () => (video.videoWidth && video.videoHeight ? { w: video.videoWidth, h: video.videoHeight } : null);
 
-  const BOX = ["left", "top", "width", "height", "right", "bottom", "objectFit", "clipPath"];
+  const BOX = ["left", "top", "width", "height", "right", "bottom", "objectFit", "clipPath", "transform", "transformOrigin"];
   function layoutVideo() {
-    // An embed's player stretches its picture over the whole iframe, so the
-    // iframe is always laid out as the picture, taken to be 16:9 (we can't
-    // see its real size). In the guide it fills the frame, like the video.
+    // An embed's iframe is always laid out as the picture, taken to be 16:9
+    // (we can't see its real size). In the guide it fills the frame, like
+    // the video.
     const el = P.frame || video;
     const st = el.style;
     if (P.frame) for (const k of BOX) video.style[k] = "";
@@ -679,31 +687,39 @@
     const sc = P.frame && !fullView ? { aspect: "auto", scale: "zoom", crop: "off", overscan: 0 } : P.screen;
     const src = P.frame ? { w: 16, h: 9 } : P.videoSize();
     const a = sc.aspect === "16:9" ? 16 / 9 : sc.aspect === "4:3" ? 4 / 3 : src ? src.w / src.h : 0;
-    const plain = sc.aspect === "auto" && sc.scale === "fit" && sc.crop === "off" && !sc.overscan;
+    const plain = sc.aspect === "auto" && sc.scale === "fit" && sc.crop === "off" && !P.overscanXY(sc).some(Boolean);
     if (!W || !H || !a || (!P.frame && (!fullView || plain))) {
       for (const k of BOX) st[k] = "";
       return;
     }
-    let fx = 1, fy = 1; // fraction of the width / height kept
+    let fx = 1, fy = 1; // fraction of the width / height kept by the crop
     if (sc.crop === "sides" && a > 4 / 3) fx = 4 / 3 / a;
     if (sc.crop === "tb" && a < 16 / 9) fy = a / (16 / 9);
-    const os = U.clamp(sc.overscan || 0, -50, 50) / 100;
-    const keep = 1 - Math.max(os, 0);
-    fx *= keep;
-    fy *= keep;
-    // underscan: the picture goes in a smaller box in the middle of the screen
-    const Ws = W * (1 + Math.min(os, 0)), Hs = H * (1 + Math.min(os, 0));
     const av = (a * fx) / fy; // shape of the part we keep
     let dw, dh;               // where it goes on screen
-    if (sc.scale === "stretch") { dw = Ws; dh = Hs; }
-    else if ((sc.scale === "zoom") === av > Ws / Hs) { dh = Hs; dw = Hs * av; }
-    else { dw = Ws; dh = Ws / av; }
+    if (sc.scale === "stretch") { dw = W; dh = H; }
+    else if ((sc.scale === "zoom") === av > W / H) { dh = H; dw = H * av; }
+    else { dw = W; dh = W / av; }
+    let vw = Math.min(dw, W), vh = Math.min(dh, H); // the part that shows
+    // Overscan, per axis: above 0 the picture grows past the part that shows
+    // (its edges are cut off); below 0 both shrink, leaving a black border.
+    const [ox, oy] = P.overscanXY(sc).map((o) => o / 100);
+    if (ox >= 0) dw /= 1 - ox; else { dw *= 1 + ox; vw *= 1 + ox; }
+    if (oy >= 0) dh /= 1 - oy; else { dh *= 1 + oy; vh *= 1 + oy; }
     const ew = dw / fx, eh = dh / fy;  // whole picture, cropped parts included
-    // what shows: the kept part, cut to the box (zoom spills past it)
-    const ix = (ew - Math.min(dw, Ws)) / 2, iy = (eh - Math.min(dh, Hs)) / 2;
+    let ix = (ew - vw) / 2, iy = (eh - vh) / 2;
+    // An embed's player keeps its picture 16:9 inside whatever box it gets,
+    // so the iframe stays 16:9 and is stretched to the picture's shape with
+    // a transform instead (the clip is in the iframe's own, unstretched px).
+    let bh = eh, transform = "";
+    if (P.frame) {
+      bh = (ew * 9) / 16;
+      transform = `scaleY(${eh / bh})`;
+      iy *= bh / eh;
+    }
     Object.assign(st, {
-      left: (W - ew) / 2 + "px", top: (H - eh) / 2 + "px", width: ew + "px", height: eh + "px",
-      right: "auto", bottom: "auto", objectFit: "fill",
+      left: (W - ew) / 2 + "px", top: (H - eh) / 2 + "px", width: ew + "px", height: bh + "px",
+      right: "auto", bottom: "auto", objectFit: "fill", transform, transformOrigin: transform ? "0 0" : "",
       clipPath: ix > 0.5 || iy > 0.5 ? `inset(${iy.toFixed(1)}px ${ix.toFixed(1)}px)` : "",
     });
   }

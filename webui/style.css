@@ -488,7 +488,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
   border-bottom: 2px solid #000110;
   color: var(--lime); font-size: 25px; text-shadow: var(--shadow);
 }
-#pnl-rows { position: relative; max-height: 296px; overflow: hidden; padding: 4px 0; }
+#pnl-rows { position: relative; max-height: 350px; overflow: hidden; padding: 4px 0; }
 .pnl-row {
   height: 36px; padding: 0 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;
   font-size: 23px; line-height: 28px; white-space: nowrap; text-shadow: var(--shadow);

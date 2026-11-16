@@ -810,6 +810,23 @@
     Store.save();
     Player.setScreen(screenFor(key));
   }
+  /** Overscan, either one setting or width and height apart (Separate X/Y). */
+  function overscanRows(sc) {
+    const [x, y] = Player.overscanXY(sc);
+    const OS_DESC = "Above 0 pushes the edges off the screen, as a TV does. Below 0 (underscan) shrinks the picture.";
+    const row = (label, v, prop, desc) => ({
+      label, value: v + "%", desc,
+      step: (d) => changeScreen({ [prop]: U.clamp(v + d, -50, 50) }),
+    });
+    const split = {
+      label: "Separate X/Y", value: sc.splitScan ? "On" : "Off",
+      desc: sc.splitScan ? "Overscan the width and the height apart. Off sets both to the width's." : "Set the overscan of the width and the height apart, to stretch or squeeze the picture one way only.",
+      step: () => changeScreen(sc.splitScan ? { splitScan: false } : { splitScan: true, overscanY: x }),
+    };
+    return sc.splitScan
+      ? [row("Overscan X", x, "overscan", "Width. " + OS_DESC), row("Overscan Y", y, "overscanY", "Height. " + OS_DESC), split]
+      : [row("Overscan", x, "overscan", OS_DESC), split];
+  }
   function screenRows() {
     const sc = Player.screen, key = S.tunedKey;
     const own = !!(key && Store.cfg.screenCh[key]);
@@ -834,11 +851,7 @@
         sides: "Trim the black bars beside 4:3 shows sent inside a 16:9 picture, leaving the middle 4:3.",
         tb: "Trim the black bars above and below widescreen shows sent inside a 4:3 picture.",
       }[sc.crop]),
-      {
-        label: "Overscan", value: (sc.overscan || 0) + "%",
-        desc: "Above 0: trim the picture's edges, as a TV does, hiding lines along them. Below 0 (underscan): shrink the picture to show edges your TV cuts off.",
-        step: (d) => changeScreen({ overscan: U.clamp((sc.overscan || 0) + d, -50, 50) }),
-      },
+      ...overscanRows(sc),
       { sep: true },
       {
         label: "Apply To", value: own ? "This Channel" : "All Channels",

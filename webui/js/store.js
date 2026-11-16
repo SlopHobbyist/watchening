@@ -26,7 +26,7 @@
     prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "", chanIcons: true, squish: false },
     last: "",
     ccOffsets: {},   // channel key -> subtitle offset (seconds)
-    screen: {},      // screen options for every channel: { aspect, scale, crop, overscan }
+    screen: {},      // screen options for every channel: { aspect, scale, crop, overscan, splitScan, overscanY }
     screenCh: {},    // channel key -> screen options of its own
   });
 
