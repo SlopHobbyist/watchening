@@ -49,13 +49,15 @@
   }
 
   /** The player link for a channel: autoplaying, with zlive's own controls,
-   *  title and badge hidden (the viewer draws its own), and the picture
-   *  stretched over the whole iframe, which the player sizes to the picture. */
+   *  title and badge hidden (the viewer draws its own), square corners (the
+   *  player rounds them otherwise), and the picture stretched over the whole
+   *  iframe, which the player sizes to the picture. */
   function embedUrl(url, muted) {
     const u = new URL(url);
     u.search = new URLSearchParams({
       autoplay: "1", muted: muted ? "1" : "0", controls: "none",
       title: "0", brand: "0", frame: "0", bg: "000000", fit: "fill",
+      radius: "0",
     });
     return u.href;
   }
