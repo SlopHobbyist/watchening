@@ -6,7 +6,7 @@
  *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
- *   Options    subtitle defaults, channel icons, CORS proxy, erase everything
+ *   Options    subtitle defaults, channel icons, squish mode, CORS proxy, erase everything
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
  *       Left (A) / Back / Esc / Backspace back out · Back in the categories (or F1) closes
@@ -17,7 +17,7 @@
   const PAGES = [
     { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
-    { name: "Options", desc: "Subtitles, channel icons, the playlist proxy, the remote control keys, and erasing everything." },
+    { name: "Options", desc: "Subtitles, channel icons, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
   ];
   const VIS = 7;          // visible rows
   const PITCH = 44;       // row height + gap
@@ -141,6 +141,11 @@
         text: "Channel Icons", tag: p.chanIcons !== false ? "On" : "Off",
         info: { title: "Channel Icons", desc: "Show a built-in icon, picked by channel name, for channels whose playlist has none (zlive.st channels never do). The icons are the ones the channels used around 2005." },
         act: () => { App.setPrefs({ chanIcons: p.chanIcons === false }); App.rebuild(); render(); },
+      },
+      {
+        text: "Squish Mode (4:3 TV)", tag: p.squish ? "On" : "Off",
+        info: { title: "Squish Mode", desc: "For a 16:9 box whose converter squeezes the picture onto a 4:3 TV. Draws the guide and the picture wider so they look right on the TV." },
+        act: () => { App.setPrefs({ squish: !p.squish }); render(); },
       },
       {
         text: "CORS Proxy for Playlists", tag: p.proxy ? "On" : "None",

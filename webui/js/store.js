@@ -9,8 +9,9 @@
  *              (at most one "zlive": zlive.st's channels, see zlive.js)
  *   order:  [channel keys]   custom channel order (keys: "<playlist id>|<stream url>")
  *   hidden: [channel keys]
- *   prefs:  { epgUrl, ccDefault, ccSize, proxy, chanIcons }
- *           (chanIcons: built-in icons for channels without one, see logos.js)
+ *   prefs:  { epgUrl, ccDefault, ccSize, proxy, chanIcons, squish }
+ *           (chanIcons: built-in icons for channels without one, see logos.js;
+ *            squish: 16:9 output squeezed onto a 4:3 TV, see fit() in main.js)
  *   last:   channel key last watched
  *   ccOffsets, screen, screenCh: subtitle offsets and screen options (see below)
  * }
@@ -22,7 +23,7 @@
     playlists: [],
     order: [],
     hidden: [],
-    prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "", chanIcons: true },
+    prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "", chanIcons: true, squish: false },
     last: "",
     ccOffsets: {},   // channel key -> subtitle offset (seconds)
     screen: {},      // screen options for every channel: { aspect, scale, crop, overscan }

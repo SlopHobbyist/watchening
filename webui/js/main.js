@@ -406,21 +406,27 @@
     App.watch();
   }
 
-  /** Put the video over the guide's picture-in-picture slot, or full window. */
+  /** Put the video over the guide's picture-in-picture slot, or full window.
+   *  In squish mode the box is laid out at its shape on the TV (3/4 as wide)
+   *  and stretched back out, so the picture, captions and an embed's own
+   *  player all come out the right shape. */
   function layoutTv() {
+    const k = squish();
     if (App.mode === "watch") {
       tv.classList.add("full");
       tv.classList.remove("pip");
-      tv.style.left = tv.style.top = tv.style.width = tv.style.height = "";
+      if (k === 1) tv.style.left = tv.style.top = tv.style.width = tv.style.height = "";
+      else Object.assign(tv.style, { left: "0px", top: "0px", width: window.innerWidth * k + "px", height: window.innerHeight + "px" });
     } else {
       const r = $("pipslot").getBoundingClientRect();
       tv.classList.add("pip");
       tv.classList.remove("full");
       tv.style.left = r.left + "px";
       tv.style.top = r.top + "px";
-      tv.style.width = r.width + "px";
+      tv.style.width = r.width * k + "px";
       tv.style.height = r.height + "px";
     }
+    tv.style.transform = k === 1 ? "" : `scaleX(${1 / k})`;
     Player.setFull(App.mode === "watch");
   }
 
@@ -1076,11 +1082,22 @@
   });
 
   // ----------------------------------------------------------------- scaling
+  /*
+   * Squish mode: the box sends out 16:9 and a converter squeezes the whole
+   * frame onto a 4:3 TV, so every pixel shows up 3/4 as wide as it is tall.
+   * Everything is drawn 4/3 wider to cancel that out: the window is treated
+   * as a 4:3 screen.
+   */
+  /** How wide a pixel shows up on the TV, as a fraction of its height. */
+  function squish() { return Store.cfg.prefs.squish ? 3 / 4 : 1; }
   function fit() {
-    const s = Math.min(window.innerWidth / 800, window.innerHeight / 600);
-    stage.style.setProperty("--scale", s);
+    const k = squish();
+    const s = Math.min((window.innerWidth * k) / 800, window.innerHeight / 600);
+    stage.style.setProperty("--sx", s / k);
+    stage.style.setProperty("--sy", s);
     layoutTv();
   }
+  App.fit = fit;
   window.addEventListener("resize", fit);
 
   // ------------------------------------------------------------- data: lineup
@@ -1340,6 +1357,7 @@
     Store.save();
     Player.ccDefault = !!Store.cfg.prefs.ccDefault;
     Player.setCCSize(Store.cfg.prefs.ccSize);
+    if ("squish" in patch) fit();
   };
 
   // ------------------------------------------------------------------- clock
