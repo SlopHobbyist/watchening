@@ -479,18 +479,21 @@
     video.pause();
     return "pause";
   };
-  P.skip = (sec) => {
+  /** Clamp a position to where we may seek (not quite the live edge). */
+  P.clampTime = (t) => {
     const r = P.range();
-    if (!r) return false;
-    const max = r.vod ? r.end - 0.25 : r.end - 2;
-    video.currentTime = U.clamp(video.currentTime + sec, r.start, max);
+    return r ? U.clamp(t, r.start, r.vod ? r.end - 0.25 : r.end - 2) : null;
+  };
+  P.seekTo = (t) => {
+    const c = P.clampTime(t);
+    if (c == null) return false;
+    video.currentTime = c;
     return true;
   };
+  P.skip = (sec) => P.seekTo(video.currentTime + sec);
   P.seekFrac = (f) => {
     const r = P.range();
-    if (!r) return false;
-    video.currentTime = U.clamp(r.start + f * (r.end - r.start), r.start, r.vod ? r.end - 0.25 : r.end - 2);
-    return true;
+    return !!r && P.seekTo(r.start + f * (r.end - r.start));
   };
   P.toggleMute = () => {
     P.autoMuted = false;

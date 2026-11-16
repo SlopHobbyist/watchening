@@ -128,10 +128,11 @@
     if (!cur) return false;
     const k = e.key;
     const it = cur.items[cur.sel];
-    const typing = !!it && it.kind === "field";   // letters and Backspace go to the text box
-    const nav = typing ? null : U.nav(e);
-    if (k === "Escape" || nav === "back") cancel();
-    else if (k === "Enter") activate();
+    const typing = !!it && it.kind === "field";   // letters, Backspace and ◀▶ go to the text box
+    const n = U.nav(e);
+    const nav = typing ? null : n;
+    if (k === "Escape" || nav === "back" || U.isBack(e)) cancel();
+    else if (n === "ok") activate();
     else if (k === "ArrowDown" || nav === "down" || (k === "Tab" && !e.shiftKey)) move(1);
     else if (k === "ArrowUp" || nav === "up" || (k === "Tab" && e.shiftKey)) move(-1);
     else if (typing) return true;

@@ -3,7 +3,8 @@
  * title strip, a list of rows, a description of the selected row and a key
  * hint. The picture keeps playing underneath.
  *
- *   Panel.open({ id, title, rows: () => [row], desc })
+ *   Panel.open({ id, title, rows: () => [row], desc, onBack })
+ *   (onBack: called after the Back key closes the panel)
  *
  *   row: { label, desc, disabled,
  *          check: bool         a choice, drawn with a radio mark
@@ -100,7 +101,7 @@
     }
     const r = list[cur.sel];
     descEl.textContent = (r && r.desc) || cur.desc || "";
-    hintEl.textContent = r && r.step ? "◀▶ Change · ▲▼ Select · Esc Close" : "OK Select · ▲▼ Move · Esc Close";
+    hintEl.textContent = r && r.step ? "◀▶ Change · ▲▼ Select · Back Close" : "OK Select · ▲▼ Move · Back Close";
   }
 
   function step(r, d, big) {
@@ -131,7 +132,7 @@
     else if (nav === "down") move(1);
     else if (nav === "left" || nav === "right") { if (usable(r) && r.step) step(r, nav === "left" ? -1 : 1, e.shiftKey); }
     else if (nav === "ok") { if (usable(r)) choose(r); }
-    else if (nav === "back") close();
+    else if (nav === "back") { const fn = cur.onBack; close(); if (fn) fn(); }
     return true;
   }
 

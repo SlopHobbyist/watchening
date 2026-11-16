@@ -9,7 +9,7 @@
  *   Options    subtitle defaults, channel icons, CORS proxy, erase everything
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
- *       Left (A) / Esc / Backspace back out · Esc in the categories (or F1) closes
+ *       Left (A) / Back / Esc / Backspace back out · Back in the categories (or F1) closes
  */
 (function () {
   "use strict";
@@ -252,10 +252,10 @@
     $("m-hint").textContent = M.moving
       ? "▲▼ Move Channel · OK Done"
       : !inRows
-        ? "▲▼ Select · OK Open · Esc Close Settings"
+        ? "▲▼ Select · OK Open · Back Close Settings"
         : M.page === 1
-          ? "▲▼ Select · OK Options · H Hide · Esc Back"
-          : "▲▼ Select · OK Choose · Esc Back";
+          ? "▲▼ Select · OK Options · H Hide · Back"
+          : "▲▼ Select · OK Choose · Back";
   }
 
   // ------------------------------------------------------------- navigation
@@ -570,12 +570,12 @@
     Dialog.open({
       title: "Remote Control Keys",
       text: [
-        "TV: ▲▼ or W S channel · 0-9 tune · G guide",
-        "◀▶ or A D 5s · L back 10s · J ahead 10s",
+        "TV: ▲▼ channel · ◀▶ 5s · OK controls · Back guide",
+        "Controls: ▲▼ timeline or buttons · ◀▶ seek or pick",
+        "Keys: W S channel · A D 5s · J L 10s · 0-9 tune",
         "Space or K pause · C captions · M mute · F full screen",
-        "Enter or Esc controls & info · I info · P controls",
-        "Shift+C subtitle options · Shift+F screen options",
-        "Menus: arrows or W A S D · Enter OK · Esc or Backspace back",
+        "I info · G guide · Shift+C subtitles · Shift+F screen",
+        "Menus: arrows · OK or Enter · Back, Esc or Backspace",
         "F1 settings, anywhere",
       ].join("\n"),
       buttons: [{ label: "OK" }],

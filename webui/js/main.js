@@ -1,16 +1,24 @@
 /*
  * iGuide-style IPTV viewer: program guide, full-screen player, settings.
  *
- * Keys (watching): Up / W previous channel · Down / S next channel · 0-9 tune
- *                  Right / D ahead 5s · Left / A back 5s · J ahead 10s · L back 10s
+ * Everything works from a TV remote's D-pad, OK and Back alone:
+ *   watching        Up / Down channel · Left / Right back / ahead 5s
+ *                   OK opens the controls · Back closes them, else opens the guide
+ *   controls        Up / Down: the timeline or the row of buttons
+ *                   timeline: Left / Right back / ahead 10s (held: 30s) · OK pause
+ *                   buttons: Left / Right pick · OK press · Back closes
+ *   guide, menus    arrows move · OK chooses · Back goes back (from the guide: the picture)
+ *
+ * Keys (watching): also W / S channel · A / D 5s · J ahead 10s · L back 10s · 0-9 tune
  *                  Space / K play/pause · C captions on/off · Shift+C subtitle options
  *                  Shift+F screen options · M mute · F full screen · G guide
- *                  Enter / Esc controls + info · I info · P controls
- *                  (also: PgUp/PgDn channel, Backspace last channel,
- *                   [ ] subtitle offset -/+0.1s, { } 1s, \ reset, media keys)
+ *                  I info · P controls
+ *                  Esc / Backspace work as Back
+ *                  (also: PgUp/PgDn channel,
+ *                   [ ] subtitle offset -/+0.1s, { } 1s, \ reset, media keys,
+ *                   remote Guide / Info / Captions / Settings keys)
  * Keys (menus):    arrows / WASD move · Enter OK · Esc / Backspace back
  *                  guide: Shift+Left/Right -/+ 1 day · PgUp/PgDn page · 0-9 channel
- *                  Esc leaves the guide for the picture
  * Anywhere:        F1 settings
  * Mouse:           click a listing to select it, click again to tune · wheel scrolls
  *                  click the picture to watch; while watching, move the mouse
@@ -92,7 +100,6 @@
     ws: U.floorSlot(Date.now()), // window start
     focus: Date.now(),           // time the cursor sits on
     tunedKey: null,
-    lastKey: null,
     entry: "", entryTimer: 0,
   };
   const nowSlot = () => U.floorSlot(Date.now());
@@ -230,8 +237,8 @@
       els.progs.replaceChildren();
       els.empty.classList.add("show");
       els.empty.textContent = App.all.length
-        ? "All channels are hidden. Press F1 for Settings to show them."
-        : "No channels yet. Press F1 for Settings to add an M3U playlist.";
+        ? "All channels are hidden. Press OK for Settings to show them."
+        : "No channels yet. Press OK for Settings to add an M3U playlist.";
       App.showInfo({
         title: "Welcome",
         desc: "Add an IPTV playlist (M3U or M3U8) from a web address or a file on this computer, then come back here to browse.",
@@ -436,7 +443,7 @@
     if (isNaN(n) || !N()) return renderGrid();
     let idx = App.channels.findIndex((c) => c.n >= n);
     if (idx < 0) idx = N() - 1;
-    if (App.mode === "watch") { tune(idx); showBanner(); }
+    if (App.mode === "watch") { tune(idx); announce(); }
     else { S.sel = idx; S.top = N() <= ROWS ? 0 : idx; renderGrid(); }
   }
 
@@ -444,10 +451,10 @@
   function tune(idx) {
     const ch = App.channels[idx];
     if (!ch) return;
-    if (S.tunedKey !== ch.key) S.lastKey = S.tunedKey;
     S.tunedKey = ch.key;
     Store.cfg.last = ch.key;
     Store.save();
+    endScrub(false);
     Player.load(ch);
     Player.setOffset(Store.cfg.ccOffsets[ch.key] || 0);
     Player.setScreen(screenFor(ch.key));
@@ -462,15 +469,18 @@
     if (!n) return;
     const i = tunedIdx();
     tune(((i < 0 ? 0 : i) + d + n) % n);
-    showBanner();
+    announce();
   }
-  function lastChannel() {
-    if (!S.lastKey) return;
-    if (App.tuneKey(S.lastKey)) showBanner();
+  /** After a channel change: the info banner, unless the controls are open
+   *  (their title row already names the new channel). */
+  function announce() {
+    if (ctl.on && !bannerHold) renderPbar();
+    else showBanner();
   }
 
   // ------------------------------------------------------------------ banner
-  let bannerTimer = 0;
+  // ms 0 holds the banner up until the controls close (the Info button)
+  let bannerTimer = 0, bannerHold = false;
   function showBanner(ms = 5000) {
     const ch = tunedCh();
     if (!ch || App.mode !== "watch") return;
@@ -487,10 +497,12 @@
       : Player.loading ? "Tuning..." : p.none ? (p.empty ? ch.name : "No program information.") : describe(p);
     fitText($("b-desc"), desc, true);
     clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(hideBanner, ms);
+    if (ms === 0) bannerHold = true;
+    if (!bannerHold) bannerTimer = setTimeout(hideBanner, ms);
     placeOverlays();
   }
   function hideBanner() {
+    bannerHold = false;
     clearTimeout(bannerTimer);
     $("banner").classList.remove("show");
     placeOverlays();
@@ -506,10 +518,11 @@
     tv.classList.toggle("lift-p", p && !b);
     tv.classList.toggle("lift-bp", b && p);
   }
-  /** Enter / Esc: show both, or hide whichever is showing. */
-  function toggleOverlays() {
-    if (bannerShown() || pbarShown()) { hideBanner(); hidePbar(); }
-    else { showBanner(6000); showPbar(6000); }
+  /** Back while watching: close the controls; without them, the guide.
+   *  (The info banner never holds Back up: it goes away by itself.) */
+  function back() {
+    if (pbarShown()) { hideBanner(); hidePbar(); }
+    else App.openGuide();
   }
 
   // ------------------------------------------------------- progress / trick bar
@@ -527,14 +540,103 @@
   let pbarTimer = 0, pbarTick = 0, flash = { dir: 0, until: 0 }, pbarHover = false;
   const pbarShown = () => pb.root.classList.contains("show");
 
-  function showPbar(ms = 4000) {
+  /*
+   * Remote control focus in the control bar. OK opens the bar with focus on
+   * the timeline (or, where the channel can't seek, on the buttons); Up and
+   * Down move between the timeline and the row of buttons. The bar shown by
+   * moving the mouse has no focus, so the arrows still change channel.
+   */
+  const CTL_MS = 8000;
+  const BTNS = Array.from(pb.root.querySelectorAll(".pb-btn"));
+  const ctl = { on: false, row: "bar", btn: 0 };
+  const btnIdx = (a) => Math.max(0, BTNS.findIndex((b) => b.dataset.act === a));
+  function btnOk(b) {
+    const a = b && b.dataset.act;
+    if (a === "play") return Player.canPause();
+    if (a === "rew" || a === "ff") return !!Player.range();
+    return !!b;
+  }
+  /** Open the controls with focus; `act` focuses that button. */
+  function openCtl(act) {
+    if (App.mode !== "watch" || !tunedCh()) return;
+    if (!ctl.on || act) {
+      ctl.on = true;
+      ctl.row = Player.range() && !act ? "bar" : "btns";
+      ctl.btn = btnIdx(act || "play");
+    }
+    if (!bannerHold) hideBanner(); // the bar would jump when it timed out
+    showPbar(CTL_MS);
+  }
+  function moveBtn(d) {
+    for (let i = ctl.btn + d; i >= 0 && i < BTNS.length; i += d) {
+      if (btnOk(BTNS[i])) { ctl.btn = i; break; }
+    }
+    renderCtl();
+  }
+  function renderCtl() {
+    const on = ctl.on && pbarShown();
+    if (on) {
+      if (ctl.row === "bar" && !Player.range()) ctl.row = "btns";
+      if (!btnOk(BTNS[ctl.btn])) {
+        // nearest usable button, else the first
+        let best = -1;
+        BTNS.forEach((b, i) => { if (btnOk(b) && (best < 0 || Math.abs(i - ctl.btn) < Math.abs(best - ctl.btn))) best = i; });
+        ctl.btn = Math.max(0, best);
+      }
+    }
+    pb.root.classList.toggle("focus-bar", on && ctl.row === "bar");
+    BTNS.forEach((b, i) => b.classList.toggle("focus", on && ctl.row === "btns" && i === ctl.btn));
+  }
+  /** Keys while the controls have focus. */
+  function keyCtl(e, nav) {
+    if (!nav) return false;
+    armPbar(CTL_MS);
+    if (nav === "back") { hideBanner(); hidePbar(); return true; }
+    if (ctl.row === "bar") {
+      if (nav === "up") ctl.row = "btns";
+      else if (nav === "left" || nav === "right") act.skip((nav === "left" ? -1 : 1) * (e.repeat ? 30 : 10));
+      else if (nav === "ok") act.play();
+    } else {
+      if (nav === "down" && Player.range()) ctl.row = "bar";
+      else if (nav === "left" || nav === "right") moveBtn(nav === "left" ? -1 : 1);
+      else if (nav === "ok") {
+        const b = BTNS[ctl.btn];
+        if (btnOk(b)) act[b.dataset.act]({ fromCtl: true });
+      }
+    }
+    renderCtl();
+    return true;
+  }
+
+  /*
+   * Seeking with the arrows moves the marker at once but seeks only once
+   * they've been let go of for a moment, so holding one down (or tapping it
+   * a few times) doesn't send the player a seek per key repeat.
+   */
+  let scrub = null, scrubTimer = 0;
+  function scrubBy(sec) {
+    const from = scrub != null ? scrub : Player.time();
+    const t = Player.clampTime(from + sec);
+    if (t == null) return false;
+    scrub = t;
+    clearTimeout(scrubTimer);
+    scrubTimer = setTimeout(() => endScrub(true), 350);
+    return true;
+  }
+  function endScrub(seek) {
+    clearTimeout(scrubTimer);
+    if (seek && scrub != null) Player.seekTo(scrub);
+    scrub = null;
+  }
+
+  function showPbar(ms) {
     if (App.mode !== "watch" || !tunedCh()) return;
     pb.root.classList.add("show");
     placeOverlays();
     renderPbar();
     clearInterval(pbarTick);
     pbarTick = setInterval(renderPbar, 250);
-    armPbar(ms);
+    armPbar(ms || (ctl.on ? CTL_MS : 4000));
   }
   function armPbar(ms) {
     clearTimeout(pbarTimer);
@@ -547,7 +649,11 @@
   function hidePbar() {
     clearTimeout(pbarTimer);
     clearInterval(pbarTick);
+    const held = ctl.on && bannerHold;
+    ctl.on = false;
     pb.root.classList.remove("show");
+    renderCtl();
+    if (held) hideBanner(); // the Info button's banner goes with the controls
     placeOverlays();
   }
 
@@ -562,12 +668,12 @@
 
     const r = Player.range();
     let left = "", right = "", frac = 1, pos = "";
+    const t = scrub != null ? scrub : Player.time();
     if (r && r.vod) {
-      const t = Player.time();
       left = "0:00"; right = U.fmtDur(r.end); pos = U.fmtDur(t);
       frac = (t - r.start) / (r.end - r.start);
     } else if (r) {
-      const t = Player.time(), behind = r.end - t;
+      const behind = r.end - t;
       left = U.fmtSlot(now - (r.end - r.start) * 1000); right = "Live";
       pos = behind < 15 ? "Live" : "-" + U.fmtDur(behind);
       frac = (t - r.start) / (r.end - r.start);
@@ -598,6 +704,8 @@
     pb.root.classList.toggle("seekable", !!r);
     pb.root.querySelector('[data-act="play"]').classList.toggle("disabled", !Player.canPause());
     pb.root.querySelector('[data-act="cc"]').classList.toggle("on", !!Player.cc);
+    pb.root.querySelector('[data-act="info"]').classList.toggle("on", bannerShown());
+    renderCtl();
   }
 
   // ----------------------------------------------------------------- actions
@@ -619,7 +727,7 @@
     },
     /** Jump `sec` seconds (negative: back). */
     skip(sec) {
-      if (Player.skip(sec)) flash = { dir: Math.sign(sec), until: Date.now() + 900 };
+      if (scrubBy(sec)) flash = { dir: Math.sign(sec), until: Date.now() + 900 };
       else osd(sec < 0 ? "Rewind isn't available on this channel" : "Fast forward isn't available on this channel");
       showPbar();
     },
@@ -627,7 +735,7 @@
     ff() { act.skip(10); },
     cc() {
       const label = Player.toggleCC();
-      if (label === null) osd("No subtitles in this stream. Shift+C for subtitle options.", 4000);
+      if (label === null) osd("No subtitles in this stream. See Subtitles for more options.", 4000);
       else osd(label === "Off" ? "Subtitles Off" : `Subtitles: ${label}`);
       if (pbarShown()) renderPbar();
     },
@@ -636,8 +744,14 @@
       osd(`Subtitle Offset ${fmtOffset(o)}` + (Player.cc ? "" : " (subtitles are off)"));
     },
     subFile() { $("file-sub").click(); },
-    subs() { togglePanel("subs"); },
-    screen() { togglePanel("screen"); },
+    // from the controls, Back in the panel goes back to the controls
+    subs(o) { togglePanel("subs", o && o.fromCtl); },
+    screen(o) { togglePanel("screen", o && o.fromCtl); },
+    info(o) {
+      if (bannerShown()) hideBanner();
+      else showBanner(ctl.on || (o && o.fromCtl) ? 0 : 5000);
+      if (pbarShown()) renderPbar();
+    },
     mute() { osd(Player.toggleMute() ? "Mute" : "Sound On"); },
     guide() { App.openGuide(); },
     fullscreen() {
@@ -754,19 +868,25 @@
         },
       },
       { label: "Reset to Defaults", desc: "Auto shape, Fit, no crop, no overscan.", act: () => changeScreen(Object.assign({}, Player.SCREEN_DEFAULT)) },
+      ...(document.fullscreenEnabled ? [{ sep: true }, {
+        label: "Full Screen", value: document.fullscreenElement ? "On" : "Off",
+        desc: "Fill the whole display, hiding the browser's toolbars. Also F, or double-click the picture.",
+        step: () => act.fullscreen(),
+      }] : []),
     ];
   }
+  document.addEventListener("fullscreenchange", () => Panel.refresh());
 
   const PANELS = {
     subs: { title: "Subtitle Options", rows: subtitleRows },
     screen: { title: "Screen Options", rows: screenRows },
   };
-  function togglePanel(id) {
+  function togglePanel(id, fromCtl) {
     if (Panel.id() === id) return Panel.close();
     if (App.mode !== "watch" || !tunedCh()) return;
     hideBanner();
     hidePbar();
-    Panel.open(Object.assign({ id }, PANELS[id]));
+    Panel.open(Object.assign({ id, onBack: fromCtl ? () => openCtl(id) : null }, PANELS[id]));
   }
 
   Player.on((type, msg) => {
@@ -803,25 +923,27 @@
   // ------------------------------------------------------------------- input
   function keyWatch(e, k) {
     const c = k.length === 1 ? k.toLowerCase() : k;
+    const nav = U.nav(e);
+    if (ctl.on && pbarShown() && keyCtl(e, nav)) return true;
     if (e.shiftKey && c === "c") { act.subs(); return true; }
     if (e.shiftKey && c === "f") { act.screen(); return true; }
+    if (nav === "ok") { openCtl(); return true; }
+    if (nav === "back") { back(); return true; } // Esc, Backspace or the remote's Back
     switch (c) {
       case "ArrowUp": case "w": case "PageUp": surf(-1); break;
       case "ArrowDown": case "s": case "PageDown": surf(1); break;
       case "ChannelUp": surf(1); break;
       case "ChannelDown": surf(-1); break;
-      case "ArrowRight": case "d": act.skip(5); break;
-      case "ArrowLeft": case "a": act.skip(-5); break;
+      case "ArrowRight": case "d": act.skip(e.repeat ? 15 : 5); break;
+      case "ArrowLeft": case "a": act.skip(e.repeat ? -15 : -5); break;
       case "j": case "MediaFastForward": case "MediaTrackNext": act.skip(10); break;
       case "l": case "MediaRewind": case "MediaTrackPrevious": act.skip(-10); break;
       case " ": case "k": case "MediaPlayPause": case "MediaPlay": case "MediaPause": act.play(); break;
-      case "c": act.cc(); break;
+      case "c": case "ClosedCaptionToggle": case "Subtitle": act.cc(); break;
       case "m": act.mute(); break;
-      case "Enter": case "Escape": toggleOverlays(); break;
-      case "i": bannerShown() ? hideBanner() : showBanner(); break;
-      case "p": pbarShown() ? hidePbar() : showPbar(); break;
-      case "g": case "ContextMenu": App.openGuide(); break;
-      case "Backspace": lastChannel(); break;
+      case "i": case "Info": act.info(); break;
+      case "p": pbarShown() && ctl.on ? hidePbar() : openCtl(); break;
+      case "g": case "Guide": case "ContextMenu": App.openGuide(); break;
       case "[": act.offset(-0.1); break;
       case "]": act.offset(0.1); break;
       case "{": act.offset(-1); break;
@@ -845,18 +967,22 @@
       case "PageUp": case "ChannelUp": page(-1); break;
       case "PageDown": case "ChannelDown": page(1); break;
       case " ": enter(); break;
-      case "g": case "G": if (N()) App.watch(); break;
+      case "g": case "G": case "Guide": if (N()) App.watch(); break;
       default: return false;
     }
     return true;
   }
 
-  document.addEventListener("keydown", (e) => {
-    Player.unlock();
+  function onKey(e) {
+    if (e.isTrusted) {
+      Player.unlock();
+      guardBack();
+      if (U.isBack(e)) lastBackKey = Date.now();
+    }
     if (Dialog.key(e)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key;
-    if (k === "F1") {
+    if (k === "F1" || k === "Settings") {
       e.preventDefault();
       if (App.mode === "menu") Settings.close(); else App.openMenu();
       return;
@@ -868,8 +994,41 @@
     if ((k === "f" || k === "F") && !e.shiftKey) act.fullscreen();
     else handled = App.mode === "watch" ? keyWatch(e, k) : keyGuide(e, k);
     if (handled) e.preventDefault();
+  }
+  document.addEventListener("keydown", onKey);
+  document.addEventListener("pointerdown", (e) => { Player.unlock(); if (e.isTrusted) guardBack(); }, true);
+
+  /*
+   * The Back button on a TV remote. Android TV browsers mostly don't send it
+   * to the page as a key: they go back in the browser's history instead. So
+   * on TVs we keep one extra history entry on top of the page; Back takes it
+   * off (popstate), we treat that as the Back key and put it back. Added only
+   * after a key press or click, since browsers skip history entries a page
+   * adds before the user has interacted with it. ?tv in the address turns
+   * this on anywhere, ?tv=0 off.
+   */
+  const tvParam = new URLSearchParams(location.search).get("tv");
+  const TV = tvParam != null ? tvParam !== "0"
+    : /\b(Android TV|GoogleTV|Google TV|AFT\w*|SHIELD|BRAVIA|CrKey|SMART-TV|SmartTV|Tizen|Web0S|webOS)\b/i.test(navigator.userAgent) ||
+      matchMedia("(any-pointer: none)").matches;
+  let guarded = false, lastBackKey = 0;
+  function guardBack() {
+    if (!TV || guarded) return;
+    guarded = true;
+    history.pushState({ remoteBack: true }, "");
+  }
+  window.addEventListener("popstate", () => {
+    if (!guarded) return;
+    guarded = false;
+    guardBack();
+    // a remote that also sent Back as a key has already been handled
+    if (Date.now() - lastBackKey < 600) return;
+    onKey({
+      key: "GoBack", keyCode: 0, repeat: false, isTrusted: false,
+      shiftKey: false, ctrlKey: false, metaKey: false, altKey: false,
+      preventDefault() {}, stopPropagation() {},
+    });
   });
-  document.addEventListener("pointerdown", () => Player.unlock(), true);
 
   let wheelAcc = 0;
   document.addEventListener("wheel", (e) => {

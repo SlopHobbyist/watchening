@@ -9,18 +9,28 @@
 
   U.$ = (id) => document.getElementById(id);
   U.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  /** Menu keys: arrows and WASD move, Enter is OK, Esc / Backspace go back. */
+  /** Menu keys: arrows and WASD move, Enter is OK, Esc / Backspace go back.
+   *  TV remotes: the D-pad's centre button is OK (Enter, or Select / Android
+   *  keyCode 23 in some web views); the remote's Back button arrives as
+   *  GoBack / BrowserBack, Android keyCode 4, webOS 461 or Tizen 10009 (or not
+   *  at all: see the history guard in main.js). */
   U.nav = (e) => {
     switch (e.key) {
       case "ArrowUp": case "w": case "W": return "up";
       case "ArrowDown": case "s": case "S": return "down";
       case "ArrowLeft": case "a": case "A": return "left";
       case "ArrowRight": case "d": case "D": return "right";
-      case "Enter": return "ok";
-      case "Escape": case "Backspace": return "back";
+      case "Enter": case "Select": return "ok";
+      case "Escape": case "Backspace": case "GoBack": case "BrowserBack": case "XF86Back": return "back";
+    }
+    switch (e.keyCode) {
+      case 23: return "ok";
+      case 4: case 461: case 10009: return "back";
     }
     return null;
   };
+  /** A Back button (Esc or a remote's Back), not the Backspace key. */
+  U.isBack = (e) => e.key !== "Backspace" && U.nav(e) === "back";
   U.uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   U.esc = (s) =>
     String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
