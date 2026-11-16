@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Listings</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage">
+
+  <!-- ===================== GUIDE ===================== -->
+  <div id="guide">
+    <div id="hdr">
+      <img id="logo" src="assets/comcast_logo_white.svg" alt="comcast" draggable="false">
+      <div id="tvl">TV Listings</div>
+      <div id="clock">12:00am</div>
+      <div id="tvg"><img src="assets/tvguide_logo.svg" alt="TV Guide" draggable="false"></div>
+    </div>
+
+    <div id="info">
+      <div id="i-title"></div>
+      <div id="i-chan"></div>
+      <div id="i-time"></div>
+      <div id="i-icons"></div>
+      <div id="i-desc"></div>
+    </div>
+
+    <div id="timebar">
+      <div id="tb-day">Today</div>
+      <div class="tb-sep" style="left:166px"></div>
+      <svg id="tb-icon" viewBox="0 0 38 28" aria-hidden="true">
+        <g fill="#fff">
+          <rect x="1" y="1" width="25" height="3.4"/>
+          <rect x="1" y="7.2" width="25" height="3.4"/>
+          <rect x="1" y="13.4" width="14" height="3.4"/>
+          <rect x="1" y="19.6" width="14" height="3.4"/>
+        </g>
+        <circle cx="26" cy="17" r="9.6" fill="#fff" stroke="#0b2a4f" stroke-width="1.6"/>
+        <path d="M26,10.5 V17.4 H31.2" fill="none" stroke="#0b2a4f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="tb-time" id="tb-t0"></div>
+      <div class="tb-sep" style="left:362px"></div>
+      <div class="tb-time" id="tb-t1"></div>
+      <div class="tb-sep" style="left:558px"></div>
+      <div class="tb-time" id="tb-t2"></div>
+      <div class="tb-sep" style="left:754px"></div>
+      <svg id="tb-arrow" viewBox="0 0 10 16" aria-hidden="true"><path d="M1,1 L9,8 L1,15 Z" fill="#fff"/></svg>
+    </div>
+
+    <div id="grid">
+      <div id="chans"></div>
+      <div id="stripe"></div>
+      <div id="progs"></div>
+    </div>
+
+    <div id="footer"></div>
+  </div>
+
+  <!-- ===================== TV / VIDEO ===================== -->
+  <div id="tv" class="pip">
+    <canvas id="tv-canvas" width="400" height="300"></canvas>
+    <video id="tv-video" playsinline autoplay muted></video>
+  </div>
+
+  <!-- channel number entry while watching -->
+  <div id="osd-num"></div>
+
+  <!-- info banner shown while watching -->
+  <div id="banner">
+    <div id="b-top">
+      <div id="b-title"></div>
+      <div id="b-chan"></div>
+      <div id="b-sep"></div>
+      <div id="b-clock"></div>
+    </div>
+    <div id="b-body">
+      <div id="b-time"></div>
+      <div id="b-desc"></div>
+    </div>
+  </div>
+</div>
+
+<script src="lineup.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

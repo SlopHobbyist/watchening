@@ -1,0 +1,227 @@
+/*
+ * iGuide-style program guide. Everything is laid out on a fixed 800x600 (4:3)
+ * stage that main.js scales to fit the window.
+ *
+ * Typeface: Tiresias Screenfont (webui/fonts), the set-top box font.
+ */
+@font-face {
+  font-family: "GuideFont";
+  src: url("fonts/TiresiasScreenfont-web.ttf") format("truetype");
+  font-weight: 100 900;   /* single weight: never synthesize a fake bold */
+  font-display: block;
+}
+/* The box's font had a short hyphen ("2-2:30a", "TV-PG"); Tiresias' is dash-long. */
+@font-face {
+  font-family: "GuideFont";
+  src: local("Segoe UI Semibold"), local("SegoeUI-Semibold"), local("Arial Bold"), local("Arial-BoldMT"), local("Arial");
+  font-weight: 100 900;   /* must match the main face or the family splits */
+  unicode-range: U+002D;
+}
+
+:root {
+  --font: "GuideFont", "Tiresias Screenfont", "Tiresias PCfont", "Frutiger LT Std", Frutiger,
+          "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --lime: #d2e6a8;
+  --white: #d7d7dc;   /* guide "white" is a light blue-gray */
+  --chan-text: #1b2238;
+  --shadow: 1.5px 1.5px 1px rgba(0,0,0,.85);
+  --slot: 196px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; height: 100%;
+  background: #000;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+}
+
+#stage {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 800px; height: 600px;
+  transform: translate(-50%, -50%) scale(var(--scale, 1));
+  transform-origin: 50% 50%;
+  overflow: hidden;
+  background: #000;
+  font-family: var(--font);
+  font-weight: 400;
+  -webkit-text-stroke: 0.45px currentColor;   /* medium weight, between regular and bold */
+  color: var(--white);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ guide */
+#guide { position: absolute; inset: 0; }
+#stage.watching #guide { visibility: hidden; }
+
+#hdr {
+  position: absolute; left: 0; top: 0; width: 464px; height: 110px;
+  background: linear-gradient(#21486f, #1f456b 40%, #1d4268);
+  border-bottom: 1px solid #13183a;
+}
+
+#logo { position: absolute; left: 53px; top: 51px; width: 177px; height: auto; }
+
+#tvl, #clock {
+  position: absolute; right: calc(464px - 379px); font-size: 26.5px; line-height: 28px;
+  text-shadow: var(--shadow); white-space: nowrap;
+}
+#tvl { top: 38px; color: var(--lime); }
+#clock { top: 67px; }
+
+/* TV Guide box is 65x56 on screen; the SVG's red box sits inside a 1024 square
+   canvas, so crop to it and stretch vertically (CRT pixels weren't square). */
+#tvg { position: absolute; left: 386px; top: 41px; width: 65px; height: 56px; filter: drop-shadow(1px 1px 1px rgba(0,0,0,.6)); }
+#tvg img {
+  position: absolute; width: 67.3px; height: 67.3px; left: -1.16px; top: -8.88px;
+  transform-origin: 0 8.88px; transform: scaleY(1.13);
+}
+
+#info {
+  position: absolute; left: 0; top: 111px; width: 464px; height: 142px;
+  background: linear-gradient(#131732 0%, #1f2a4e 30%, #33486d 55%, #52668a 80%, #6c7d97 100%);
+}
+#info > div { position: absolute; white-space: nowrap; text-shadow: var(--shadow); font-size: 26px; line-height: 28px; }
+#info > #i-title { left: 55px; top: 3px; max-width: 290px; overflow: hidden; color: var(--lime); font-size: 27px; }
+#i-chan  { right: 11px; top: 3px; }
+#i-time  { left: 55px; top: 32px; }
+#i-icons { right: 11px; top: 32px; display: flex; gap: 5px; align-items: center; height: 28px; }
+#info > #i-desc  {
+  left: 55px; top: 59px; width: 400px; height: 81px; white-space: normal;
+  overflow: hidden; font-size: 25.7px; line-height: 26.5px;
+}
+/* rating / HD badges: flat white box, lettering cut out (see badgeSvg in main.js).
+   The drop shadow is what shows through the letters. */
+.badge {
+  display: block; overflow: visible;
+  /* soft dark rim on every edge */
+  filter: drop-shadow(0 0 .8px rgba(0,0,0,.8));
+}
+/* inherited text-shadow/stroke would cut a second, offset copy of each letter */
+.badge text { font-family: var(--font); text-shadow: none; -webkit-text-stroke: 0; }
+.badge-fill { fill: var(--white); }
+.badge-shadow { fill: #0b0d14; opacity: .9; }
+
+/* --------------------------------------------------------------- timebar */
+#timebar {
+  position: absolute; left: 0; top: 253px; width: 800px; height: 40px;
+  border-top: 4px solid #111230;
+  background: linear-gradient(#173f6b, #143d69);
+}
+#timebar > div, #timebar > svg { position: absolute; }
+#tb-day {
+  left: 56px; width: 100px; top: 4px; text-align: center;
+  font-size: 27px; line-height: 28px; text-shadow: var(--shadow);
+}
+.tb-sep { top: 8px; width: 2px; height: 21px; background: linear-gradient(90deg, #b9c4d6, #8193b0); opacity: .9; }
+#tb-icon { left: 174px; top: 4px; width: 38px; height: 28px; filter: drop-shadow(1.5px 1.5px 0 #000); }
+.tb-time { top: 4px; width: var(--slot); text-align: center; font-size: 27px; line-height: 28px; text-shadow: var(--shadow); }
+#tb-t0 { left: 166px; padding-left: 4px; }
+#tb-t1 { left: 362px; }
+#tb-t2 { left: 558px; }
+#tb-arrow { left: 763px; top: 10px; width: 10px; height: 16px; filter: drop-shadow(1.5px 1.5px 0 #000); }
+
+/* ------------------------------------------------------------------ grid */
+#grid { position: absolute; left: 0; top: 293px; width: 800px; height: 219px; }
+#chans {
+  position: absolute; left: 0; top: 0; width: 156px; height: 219px;
+  background: #184359;
+}
+#stripe {
+  position: absolute; left: 156px; top: 0; width: 8px; height: 219px;
+  background: linear-gradient(90deg, #6a7fcf 0, #cfd3ea 1px, #f7f8fb 2px, #f7f8fb 5px, #c6c6c6 5px, #616161 6px, #000 7px, #0a0c22 8px);
+}
+#progs {
+  position: absolute; left: 164px; top: 0; right: 0; height: 219px;
+  background: #969695;
+  overflow: hidden;
+}
+#progs::before { /* gray/dark edge left of the program cells */
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: #4c4c66;
+}
+
+.chan {
+  position: absolute; left: 0; width: 156px; height: 52px;
+  background: linear-gradient(#5f7bd0, #5d78cd 60%, #5672c3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(0,0,0,.18);
+  color: var(--chan-text); font-size: 20px; line-height: 23px; padding-top: 1px;
+  -webkit-text-stroke: 0;          /* dark-on-light text is regular weight */
+  padding-left: 54px; text-align: center;
+  display: flex; flex-direction: column; justify-content: center;
+}
+/* the channel column's glyphs are drawn horizontally stretched (wide round "O") */
+.chan .num, .chan .call { display: block; }
+.chan .num  { transform: scaleX(1.12); font-size: 22px; line-height: 23px; }
+.chan .call { transform: scaleX(1.4); }
+.chan.entry .num { color: #fff; text-shadow: var(--shadow); }
+
+.cell {
+  position: absolute; height: 52px;
+  padding: 0 4px 0 9px;
+  display: flex; align-items: center;
+  overflow: hidden;
+  background: linear-gradient(#14364c, #18374c);
+  box-shadow: inset 0 1px 0 rgba(120,150,175,.18);
+}
+.cell span {
+  display: block; width: 100%;
+  font-size: 26.5px; line-height: 24px; max-height: 50px; overflow: hidden;
+  text-shadow: var(--shadow);
+}
+.cell.movie  { background: linear-gradient(#2d0674, #2b0470 50%, #28036a); }
+.cell.sports { background: linear-gradient(#0b7a12, #06690d); }
+.cell.kids   { background: linear-gradient(#0a579d, #03478a); }
+.cell.sel {
+  background: #d2e6a8;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.45);
+}
+.cell.sel span { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; font-size: 24.5px; letter-spacing: .3px; }
+
+#footer {
+  position: absolute; left: 0; top: 512px; width: 800px; height: 88px;
+  background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
+  border-top: 1px solid #7f8796;
+}
+
+/* -------------------------------------------------------------------- tv */
+#tv { position: absolute; background: #000; overflow: hidden; }
+#tv.pip { left: 464px; top: 0; width: 336px; height: 253px; border-left: 4px solid #11132d; border-bottom: 1px solid #11132d; }
+#tv.full { left: 0; top: 0; width: 800px; height: 600px; }
+#tv canvas, #tv video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#tv video { display: none; background: #000; }
+#tv.has-stream video { display: block; }
+#tv.has-stream canvas { display: none; }
+
+/* --------------------------------------------------------------- banner */
+#banner {
+  position: absolute; left: 4px; right: 4px; top: 446px; height: 154px;
+  display: none;
+}
+#stage.watching #banner.show { display: block; }
+#b-top {
+  position: absolute; left: 0; right: 0; top: 0; height: 40px;
+  background: linear-gradient(#cfdbf5 0, #5e89cd 3%, #4b7bbd 12%, #32639e 32%, #1d4e86 52%, #0e4073 70%, #083868 100%);
+  border-bottom: 2px solid #000110;
+}
+#b-top > div { position: absolute; top: 6px; font-size: 26.5px; line-height: 28px; text-shadow: var(--shadow); white-space: nowrap; }
+#b-title { left: 58px; max-width: 440px; overflow: hidden; color: var(--lime); }
+#b-chan  { right: 182px; }
+#b-sep   { left: 622px; top: 9px !important; width: 2px; height: 23px; background: #a8c3e6; opacity: .8; }
+#b-clock { left: 648px; }
+#b-body {
+  position: absolute; left: 0; right: 0; top: 40px; bottom: 0;
+  background: linear-gradient(#042548, #00264f 6%, #00264d);
+}
+#b-body > div { position: absolute; left: 58px; font-size: 26.5px; line-height: 31px; text-shadow: var(--shadow); white-space: nowrap; }
+#b-time { top: 8px; }
+#b-desc { top: 39px; width: 680px; overflow: hidden; }
+
+#osd-num {
+  position: absolute; right: 56px; top: 36px;
+  font-size: 54px; font-weight: 700; color: #7cff6a;
+  text-shadow: 3px 3px 0 #000; display: none;
+}
+#osd-num.show { display: block; }
