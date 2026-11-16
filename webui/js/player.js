@@ -19,7 +19,7 @@
   const tv = $("tv"), video = $("tv-video"), canvas = $("tv-canvas"), ccEl = $("cc");
 
   const LIBS = {
-    Hls: ["https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js", "js/vendor/hls.min.js"],
+    Hls: ["https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js", "js/vendor/hls.min.js"],
     mpegts: ["https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js", "js/vendor/mpegts.js"],
   };
   const pending = {};
@@ -62,6 +62,7 @@
     ccOffset: 0,      // seconds; positive shows subtitles later
     extCues: null, extName: "",
     hls: null, ts: null, token: 0,
+    reloads: 0,       // automatic reloads after stalls, this tune
   });
 
   const listeners = [];
@@ -80,6 +81,41 @@
     return "unknown";
   }
   const CHAINS = { hls: ["hls"], ts: ["ts"], flv: ["flv"], file: ["native"], dash: [], unknown: ["native", "hls", "ts"] };
+
+  /*
+   * Pluto TV links from iptv-org playlists (https://jmp2.uk/plu-<channel id>.m3u8)
+   * redirect to Pluto's stream servers, but the redirect itself has no CORS
+   * header, so a web page may not follow it (VLC doesn't care). Pluto's own
+   * session API does allow web pages, so ask it directly for the same stream.
+   */
+  function plutoClientId() {
+    let id = "";
+    try { id = localStorage.getItem("iptv.plutoClientId") || ""; } catch { /* */ }
+    if (!id) {
+      id = crypto.randomUUID ? crypto.randomUUID() : U.uid();
+      try { localStorage.setItem("iptv.plutoClientId", id); } catch { /* */ }
+    }
+    return id;
+  }
+  async function resolveUrl(url) {
+    const m = /^https?:\/\/jmp2\.uk\/plu-([0-9a-f]{24})\.m3u8/i.exec(url);
+    if (!m) return url;
+    try {
+      const q = new URLSearchParams({
+        appName: "web", appVersion: "9.20.0", deviceVersion: "140.0.0", deviceModel: "web",
+        deviceMake: "chrome", deviceType: "web", clientID: plutoClientId(), clientModelNumber: "1.0.0",
+        channelID: m[1], serverSideAds: "false",
+      });
+      const res = await fetch("https://boot.pluto.tv/v4/start?" + q);
+      const d = await res.json();
+      const base = d.servers && d.servers.stitcher;
+      if (!base || !d.sessionToken || !d.stitcherParams) return url;
+      return `${base}/v2/stitch/hls/channel/${m[1]}/master.m3u8?${d.stitcherParams}` +
+        `&jwt=${encodeURIComponent(d.sessionToken)}&masterJWTPassthrough=true&includeExtendedEvents=true`;
+    } catch {
+      return url;
+    }
+  }
 
   function mediaError() {
     const e = video.error;
@@ -169,13 +205,29 @@
       if (Hls && Hls.isSupported()) {
         const hls = (P.hls = new Hls({ liveDurationInfinity: true, enableWorker: true, renderTextTracksNatively: true }));
         hls.subtitleDisplay = false; // we render cues ourselves
-        let retries = 0;
+        let retries = 0, audioSwitched = false;
         hls.on(Hls.Events.LEVEL_LOADED, (_, d) => { if (P.hls === hls) P.live = !!(d.details && d.details.live); });
+        // Audio muxed into the main rendition that hls.js had to drop (AC-3 /
+        // E-AC-3, which browsers don't decode): use an alternate audio
+        // rendition instead, same language first. Without this the picture
+        // never starts, since playback waits for audio that never arrives.
+        hls.on(Hls.Events.BUFFER_CODECS, (_, d) => {
+          if (d.audio || d.audiovideo || audioSwitched || P.hls !== hls) return;
+          const tracks = hls.audioTracks || [];
+          const cur = tracks[hls.audioTrack];
+          if (!cur || cur.url) return;
+          const alts = tracks.map((t, i) => ({ t, i })).filter((x) => x.t.url);
+          const pick = alts.find((x) => x.t.lang && x.t.lang === cur.lang) || alts[0];
+          if (!pick) return;
+          audioSwitched = true;
+          hls.audioTrack = pick.i;
+        });
         hls.on(Hls.Events.FRAG_BUFFERED, () => (retries = 0));
         hls.on(Hls.Events.ERROR, (_, d) => {
           if (!d.fatal || P.hls !== hls) return;
           const msg = hlsError(d);
-          if (!ctx.done) return ctx.finish(new Error(msg));
+          // a bad segment or key while starting is often a CDN hiccup: worth one retry
+          if (!ctx.done) return ctx.finish(Object.assign(new Error(msg), { transient: /^(frag|key)/.test(d.details || "") }));
           if (d.type === Hls.ErrorTypes.MEDIA_ERROR && retries++ < 3) hls.recoverMediaError();
           else if (d.type === Hls.ErrorTypes.NETWORK_ERROR && retries++ < 3) setTimeout(() => P.hls === hls && hls.startLoad(), 1500);
           else fail(msg);
@@ -207,10 +259,12 @@
     play();
   }
 
-  P.load = async (ch) => {
+  /** Tune `ch`. `isReload` re-opens the same channel after a stall, keeping
+   *  its subtitle choice and offset. */
+  P.load = async (ch, isReload) => {
     const my = ++P.token;
     teardown();
-    resetCC();
+    if (!isReload) { P.reloads = 0; resetCC(); }
     P.ch = ch;
     P.error = "";
     tv.classList.remove("nosignal");
@@ -223,20 +277,44 @@
     }
     P.loading = true;
     emit("state");
-    const k = kind(ch.url);
-    let err = k === "dash" ? "MPEG-DASH (.mpd) streams aren't supported" : "This stream can't be played";
-    for (const how of CHAINS[k]) {
+    const url = await resolveUrl(ch.url);
+    if (my !== P.token) return;
+    const k = kind(url);
+    let chain = CHAINS[k];
+    // The <video> element isn't subject to CORS, so where the browser plays HLS
+    // itself it rescues streams hls.js can't fetch: servers without CORS
+    // headers, or that redirect without them (jmp2.uk, many ad-stitched feeds).
+    if (k === "hls" && video.canPlayType("application/vnd.apple.mpegurl")) chain = ["hls", "native"];
+    const errs = [];
+    let retried = false;
+    for (let i = 0; i < chain.length; i++) {
+      const how = chain[i];
+      const t0 = Date.now();
       try {
-        await attempt(how, ch.url, my);
+        await attempt(how, url, my);
         if (my === P.token) { P.loading = false; emit("state"); }
         return;
       } catch (e) {
         if (my !== P.token) return;
-        err = (e && e.message) || err;
+        errs.push({ how, msg: (e && e.message) || "" });
         teardown();
+        if (e && e.transient && !retried) { retried = true; i--; continue; }
+        // a server that never answered won't answer the next engine either
+        if (Date.now() - t0 > 15000) {
+          errs.unshift({ how, msg: "The stream's server isn't answering (it may be down, or blocked on your network)" });
+          break;
+        }
       }
     }
-    if (my === P.token) fail(err);
+    if (my !== P.token) return;
+    // native playback only ever says "can't play this format"; the
+    // libraries' reasons are more useful
+    const best = errs.find((e) => e.how !== "native" && e.msg) || errs.find((e) => e.msg);
+    let err = k === "dash" ? "MPEG-DASH (.mpd) streams aren't supported" : best ? best.msg : "This stream can't be played";
+    if (location.protocol === "https:" && /^http:/i.test(ch.url)) {
+      err = "This channel uses http:// and the viewer was opened over https://, which browsers block. Open the viewer over http:// instead.";
+    }
+    fail(err);
   };
   P.retry = () => P.ch && P.load(P.ch);
   P.stop = () => P.load(null);
@@ -250,6 +328,56 @@
     emit("error", msg);
     emit("state");
   }
+
+  /*
+   * Gap jumping. Live streams often begin with the first decodable frame a
+   * moment after the playhead (audio starting before video, or a stream that
+   * starts mid-GOP), or have small holes later. VLC plays straight through;
+   * the browser waits forever. If we're stuck just before buffered data, skip
+   * to it. Likewise, the browser's own HLS player sometimes sits frozen on
+   * frames it has already buffered; a tiny seek gets it going.
+   */
+  let stuckSince = 0, frozenSince = 0, lastT = -1, stallT = -1, stallSince = 0;
+  setInterval(() => {
+    // (a seek into the hole stays "seeking" forever, so that doesn't exempt us)
+    if (!P.ch || P.error || P.loading || video.paused) {
+      stuckSince = frozenSince = stallSince = 0;
+      lastT = stallT = -1;
+      return;
+    }
+    const t = video.currentTime, b = video.buffered;
+
+    // Last resort, as VLC does: a picture that hasn't moved in 10s gets the
+    // stream reloaded (twice at most per tune).
+    if (t !== stallT) { stallT = t; stallSince = Date.now(); }
+    else if (Date.now() - stallSince > 10000 && P.reloads < 2) {
+      P.reloads++;
+      stallSince = Date.now();
+      P.load(P.ch, true);
+      return;
+    }
+
+    if (t !== lastT) { lastT = t; frozenSince = 0; } else if (!frozenSince) frozenSince = Date.now();
+    let next = null;
+    for (let i = 0; i < b.length; i++) {
+      if (b.start(i) <= t + 0.05 && t < b.end(i) - 0.2) {
+        // playable data under the playhead: fine, unless the clock is frozen
+        stuckSince = 0;
+        if (frozenSince && Date.now() - frozenSince > 3000 && video.readyState >= 3 && !video.seeking) {
+          frozenSince = 0;
+          video.currentTime = t + 0.1;
+        }
+        return;
+      }
+      if (next == null && b.start(i) > t && b.start(i) - t < 10) next = b.start(i);
+    }
+    if (next == null || video.readyState >= 3) { stuckSince = 0; return; }
+    if (!stuckSince) { stuckSince = Date.now(); return; }
+    if (Date.now() - stuckSince > 800) {
+      stuckSince = 0;
+      video.currentTime = next + 0.1;
+    }
+  }, 400);
 
   // errors after a native stream started (hls.js / mpegts.js report their own)
   video.addEventListener("error", () => {
