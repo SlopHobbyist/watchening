@@ -646,7 +646,9 @@
    *   crop      off | sides | tb    sides: keep the middle 4:3 of a wider picture
    *                                 (4:3 shows sent letterboxed in 16:9);
    *                                 tb: keep the middle 16:9 of a taller one
-   *   overscan  0-10                percent trimmed off the width and height
+   *   overscan  -50-50              percent trimmed off the width and height;
+   *                                 below 0, underscan: the picture is shrunk
+   *                                 by that percent, black border around it
    *   scale     fit | stretch | zoom  what's left: whole with black bars /
    *                                 stretched to the screen / filling it, edges cut
    * The <video> box is sized so the kept part lands where it should, and
@@ -685,16 +687,20 @@
     let fx = 1, fy = 1; // fraction of the width / height kept
     if (sc.crop === "sides" && a > 4 / 3) fx = 4 / 3 / a;
     if (sc.crop === "tb" && a < 16 / 9) fy = a / (16 / 9);
-    const keep = 1 - U.clamp(sc.overscan || 0, 0, 10) / 100;
+    const os = U.clamp(sc.overscan || 0, -50, 50) / 100;
+    const keep = 1 - Math.max(os, 0);
     fx *= keep;
     fy *= keep;
+    // underscan: the picture goes in a smaller box in the middle of the screen
+    const Ws = W * (1 + Math.min(os, 0)), Hs = H * (1 + Math.min(os, 0));
     const av = (a * fx) / fy; // shape of the part we keep
     let dw, dh;               // where it goes on screen
-    if (sc.scale === "stretch") { dw = W; dh = H; }
-    else if ((sc.scale === "zoom") === av > W / H) { dh = H; dw = H * av; }
-    else { dw = W; dh = W / av; }
+    if (sc.scale === "stretch") { dw = Ws; dh = Hs; }
+    else if ((sc.scale === "zoom") === av > Ws / Hs) { dh = Hs; dw = Hs * av; }
+    else { dw = Ws; dh = Ws / av; }
     const ew = dw / fx, eh = dh / fy;  // whole picture, cropped parts included
-    const ix = (ew - dw) / 2, iy = (eh - dh) / 2;
+    // what shows: the kept part, cut to the box (zoom spills past it)
+    const ix = (ew - Math.min(dw, Ws)) / 2, iy = (eh - Math.min(dh, Hs)) / 2;
     Object.assign(st, {
       left: (W - ew) / 2 + "px", top: (H - eh) / 2 + "px", width: ew + "px", height: eh + "px",
       right: "auto", bottom: "auto", objectFit: "fill",

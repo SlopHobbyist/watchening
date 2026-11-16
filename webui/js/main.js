@@ -836,8 +836,8 @@
       }[sc.crop]),
       {
         label: "Overscan", value: (sc.overscan || 0) + "%",
-        desc: "Trim the outer edge of the picture, as a TV does. Hides lines and noise along the edges of some channels.",
-        step: (d) => changeScreen({ overscan: U.clamp((sc.overscan || 0) + d, 0, 10) }),
+        desc: "Above 0: trim the picture's edges, as a TV does, hiding lines along them. Below 0 (underscan): shrink the picture to show edges your TV cuts off.",
+        step: (d) => changeScreen({ overscan: U.clamp((sc.overscan || 0) + d, -50, 50) }),
       },
       { sep: true },
       {
