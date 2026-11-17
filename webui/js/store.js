@@ -15,6 +15,8 @@
  *            wide: 16:9 layout for a widescreen display, see fit() in main.js)
  *   last:   channel key last watched
  *   ccOffsets, screen, screenCh: subtitle offsets and screen options (see below)
+ *   vod:    On Demand (see ondemand.js): { clientId, sources: [{ id, type, name, ... }],
+ *           quality, views: { "<source id>:<library id>": view id } }
  * }
  */
 (function () {
@@ -29,6 +31,7 @@
     ccOffsets: {},   // channel key -> subtitle offset (seconds)
     screen: {},      // screen options for every channel: { aspect, scale, crop, overscan, splitScan, overscanY }
     screenCh: {},    // channel key -> screen options of its own
+    vod: { clientId: "", sources: [], quality: "original", views: {} },
   });
 
   function load() {
@@ -38,6 +41,7 @@
       if (saved && typeof saved === "object") {
         Object.assign(cfg, saved);
         cfg.prefs = Object.assign(DEFAULTS().prefs, saved.prefs || {});
+        cfg.vod = Object.assign(DEFAULTS().vod, saved.vod || {});
       }
     } catch { /* storage blocked or corrupt: start fresh */ }
     return cfg;

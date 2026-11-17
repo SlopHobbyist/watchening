@@ -6,6 +6,7 @@
  *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
+ *   On Demand  sign in to Plex (or add a server by address), servers, picture quality
  *   Options    subtitle defaults, channel icons, 16:9 mode, squish mode, CORS proxy, erase everything
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
@@ -17,12 +18,13 @@
   const PAGES = [
     { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
+    { name: "On Demand", desc: "Sign in to Plex to watch the movies and shows on your media server, and choose the picture quality." },
     { name: "Options", desc: "Subtitles, channel icons, 16:9 mode for widescreen TVs, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
   ];
   const VIS = 7;          // visible rows
   const PITCH = 44;       // row height + gap
   // col: 0 = category column has focus, 1 = the rows
-  const M = { page: 0, col: 0, sel: [0, 0, 0], top: [0, 0, 0], moving: null, entry: "", entryTimer: 0 };
+  const M = { page: 0, col: 0, sel: PAGES.map(() => 0), top: PAGES.map(() => 0), moving: null, entry: "", entryTimer: 0 };
   const rowsEl = $("m-rows"), catsEl = $("m-cats");
 
   // -------------------------------------------------------------------- rows
@@ -124,6 +126,38 @@
     return out;
   }
 
+  function onDemandRows() {
+    const out = [{
+      text: "Open On Demand",
+      info: { title: "On Demand", desc: "Browse and watch the movies and shows on your media servers. Also O, from the guide or while watching." },
+      act: () => App.openOnDemand(),
+    }];
+    for (const x of OnDemand.setups()) out.push({ text: x.text, info: { title: x.text, chan: x.label, desc: x.desc }, act: x.act });
+    for (const src of Store.cfg.vod.sources) {
+      const p = OnDemand.providers[src.type];
+      out.push({
+        text: src.name, tag: p ? p.label : "Unknown",
+        info: { title: src.name, chan: p ? p.label : "", desc: p && p.describe ? p.describe(src) : "" },
+        act: () => sourceDialog(src),
+      });
+    }
+    const q = OnDemand.quality();
+    out.push({
+      text: "Picture Quality", tag: q.label,
+      info: {
+        title: "Picture Quality", chan: q.label,
+        desc: "Original plays files as they are where the browser can, and has the server convert only what it can't. A lower setting has the server shrink the picture for a slow connection.",
+      },
+      act: () => {
+        const list = OnDemand.QUALITY;
+        Store.cfg.vod.quality = list[(list.indexOf(q) + 1) % list.length].id;
+        Store.save();
+        render();
+      },
+    });
+    return out;
+  }
+
   function optionRows() {
     const p = Store.cfg.prefs;
     return [
@@ -173,7 +207,7 @@
     ];
   }
 
-  const rowsFor = (page) => (page === 0 ? playlistRows() : page === 1 ? channelRows() : optionRows());
+  const rowsFor = (page) => [playlistRows, channelRows, onDemandRows, optionRows][page]();
   const rows = () => rowsFor(M.page);
 
   // ------------------------------------------------------------------ render
@@ -195,8 +229,10 @@
   function pageInfo(i) {
     const cfg = Store.cfg;
     const npl = userPlaylists().length;
+    const nsrc = Store.cfg.vod.sources.length;
     const chan = i === 0 ? `${npl} playlist${npl === 1 ? "" : "s"}`
-      : i === 1 ? `${App.all.length} channel${App.all.length === 1 ? "" : "s"}` : "";
+      : i === 1 ? `${App.all.length} channel${App.all.length === 1 ? "" : "s"}`
+        : i === 2 ? `${nsrc} server${nsrc === 1 ? "" : "s"}` : "";
     return { title: PAGES[i].name, chan, desc: PAGES[i].desc };
   }
 
@@ -564,6 +600,31 @@
     });
   }
 
+  function sourceDialog(src) {
+    const p = OnDemand.providers[src.type];
+    Dialog.open({
+      title: src.name,
+      text: p && p.describe ? p.describe(src) : "",
+      buttons: [
+        p && p.reconnect && {
+          label: "Find Server Again",
+          act: async () => {
+            Dialog.message("Connecting...");
+            try { await p.reconnect(src); } catch (e) { Dialog.message(e.message, true); return false; }
+            OnDemand.changed();
+            App.osd(`Connected to ${src.name}`);
+            render();
+          },
+        },
+        {
+          label: "Remove",
+          act: () => Dialog.confirm("Remove Server", `Remove ${src.name} from On Demand?`, "Remove", () => { OnDemand.removeSource(src); render(); }),
+        },
+        { label: "Cancel" },
+      ].filter(Boolean),
+    });
+  }
+
   function proxyDialog() {
     Dialog.open({
       title: "CORS Proxy",
@@ -584,7 +645,8 @@
         "Controls: ▲▼ timeline or buttons · ◀▶ seek or pick",
         "Keys: W S channel · A D 5s · J L 10s · 0-9 tune",
         "Space or K pause · C captions · M mute · F full screen",
-        "I info · G guide · Shift+C subtitles · Shift+F display",
+        "I info · G guide · O On Demand",
+        "Shift+C subtitles · Shift+F display",
         "Menus: arrows · OK or Enter · Back, Esc or Backspace",
         "F1 settings, anywhere",
       ].join("\n"),

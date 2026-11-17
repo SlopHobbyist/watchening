@@ -8,6 +8,10 @@
  *   embed            zlive channels: the provider's own player in an iframe
  *                    (live only: no pause, seeking or subtitles; mute reloads it)
  *
+ * On Demand titles (see ondemand.js) come in as channels with `vod` set:
+ * `start` is where to begin (seconds) and `dur` the running time, used when
+ * the stream doesn't say.
+ *
  * The two playback libraries are fetched only when a stream needs them, from
  * jsDelivr, or from js/vendor/ if that fails (drop copies there for offline use).
  *
@@ -67,6 +71,7 @@
     extCues: null, extName: "",
     hls: null, ts: null, token: 0,
     reloads: 0,       // automatic reloads after stalls, this tune
+    startAt: 0,       // seconds into the stream to begin at (On Demand resume)
   });
 
   const listeners = [];
@@ -238,6 +243,12 @@
     });
   }
 
+  /** Native playback: begin at P.startAt once the length is known. */
+  function seekOnLoad(my) {
+    const t = P.startAt;
+    if (t > 0) video.addEventListener("loadedmetadata", () => { if (my === P.token) video.currentTime = t; }, { once: true });
+  }
+
   async function start(how, url, my, ctx) {
     if (how === "hls") {
       const native = !!video.canPlayType("application/vnd.apple.mpegurl");
@@ -245,7 +256,10 @@
       try { Hls = await lib("Hls"); } catch (e) { if (!native) throw e; }
       if (my !== P.token) return;
       if (Hls && Hls.isSupported()) {
-        const hls = (P.hls = new Hls({ liveDurationInfinity: true, enableWorker: true, renderTextTracksNatively: true }));
+        const hls = (P.hls = new Hls({
+          liveDurationInfinity: true, enableWorker: true, renderTextTracksNatively: true,
+          startPosition: P.startAt > 0 ? P.startAt : -1,
+        }));
         hls.subtitleDisplay = false; // we render cues ourselves
         let retries = 0, audioSwitched = false;
         hls.on(Hls.Events.LEVEL_LOADED, (_, d) => { if (P.hls === hls) P.live = !!(d.details && d.details.live); });
@@ -278,6 +292,7 @@
         hls.attachMedia(video);
       } else {
         video.src = url;
+        seekOnLoad(my);
       }
     } else if (how === "ts" || how === "flv") {
       const mpegts = await lib("mpegts");
@@ -297,6 +312,7 @@
       P.live = true;
     } else {
       video.src = url;
+      seekOnLoad(my);
     }
     play();
   }
@@ -304,10 +320,13 @@
   /** Tune `ch`. `isReload` re-opens the same channel after a stall, keeping
    *  its subtitle choice and offset. */
   P.load = async (ch, isReload) => {
+    // reloading an On Demand title picks up where it stalled
+    const at = isReload && ch && ch === P.ch && ch.vod && video.currentTime > 0 ? video.currentTime : null;
     const my = ++P.token;
     teardown();
     if (!isReload) { P.reloads = 0; resetCC(); }
     P.ch = ch;
+    P.startAt = at != null ? at : (ch && ch.start) || 0;
     P.error = "";
     tv.classList.remove("nosignal");
     if (!ch) {
@@ -427,6 +446,7 @@
     if (P.how === "native" && !P.loading && P.ch && !P.error && video.error) fail(mediaError());
   });
   for (const ev of ["play", "pause", "playing", "waiting", "seeked", "ended"]) video.addEventListener(ev, () => emit("state"));
+  video.addEventListener("ended", () => { if (P.ch && !P.loading && !P.error) emit("ended"); });
 
   /** SMPTE color bars with the channel name: shown for "no signal". */
   function drawCard(ch) {
@@ -445,7 +465,7 @@
     g.fillStyle = "#fff";
     g.textAlign = "center";
     g.textBaseline = "middle";
-    let name = ch ? ch.call : "NO CHANNEL";
+    let name = ch ? (ch.vod ? ch.name : ch.call) : "NO CHANNEL";
     let size = Math.round(H * 0.09);
     g.font = `bold ${size}px Arial, sans-serif`;
     while (size > 10 && g.measureText(name).width > W * 0.56) { size--; g.font = `bold ${size}px Arial, sans-serif`; }
@@ -461,6 +481,9 @@
     if (!P.ch || P.error || P.loading) return null;
     const d = video.duration;
     const s = video.seekable;
+    // On Demand: a stream that doesn't give its length (a transcode still
+    // being made) still has the title's running time
+    if (P.ch.vod && P.ch.dur > 0 && !(Number.isFinite(d) && d > 0)) return { vod: true, start: 0, end: P.ch.dur };
     // files served without HTTP range support report a duration but can't seek
     if (!P.live && Number.isFinite(d) && d > 0) return s.length && s.end(s.length - 1) > 1 ? { vod: true, start: 0, end: d } : null;
     if (P.how === "ts" || P.how === "flv") return null;

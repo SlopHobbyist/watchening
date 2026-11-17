@@ -68,10 +68,12 @@ html, body {
 body.watching.idle, body.watching.idle * { cursor: none !important; }
 
 /* ------------------------------------------------------------------ guide */
-#top, #guide, #menu { position: absolute; left: 0; top: 0; width: var(--W); height: 600px; pointer-events: none; }
-#top > *, #guide > *, #menu > * { pointer-events: auto; }
-#stage.watching #top, #stage.watching #guide, #stage.watching #menu { visibility: hidden; }
+#top, #guide, #menu, #vod { position: absolute; left: 0; top: 0; width: var(--W); height: 600px; pointer-events: none; }
+#top > *, #guide > *, #menu > *, #vod > * { pointer-events: auto; }
+#stage.watching #top, #stage.watching #guide, #stage.watching #menu, #stage.watching #vod { visibility: hidden; }
 #stage.in-menu #guide, #stage:not(.in-menu) #menu { display: none; }
+/* On Demand's list takes the place of the guide's listings */
+#stage.in-vod #guide, #stage:not(.in-vod) #vod { display: none; }
 /* settings is a full-screen menu: no guide header, no picture */
 #stage.in-menu #top, body.in-menu #tv { visibility: hidden; }
 
@@ -131,7 +133,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 .badge-shadow { fill: #0b0d14; opacity: .9; }
 
 /* --------------------------------------------------------------- timebar */
-#timebar {
+#timebar, #v-bar {
   position: absolute; left: 0; top: 253px; width: var(--W); height: 40px;
   border-top: 4px solid #111230;
   background: linear-gradient(#173f6b, #143d69);
@@ -152,21 +154,21 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #stage.wide #tb-arrow { left: 959px; }
 
 /* ------------------------------------------------------------------ grid */
-#grid { position: absolute; left: 0; top: 293px; width: var(--W); height: 219px; }
-#chans {
+#grid, #v-grid { position: absolute; left: 0; top: 293px; width: var(--W); height: 219px; }
+#chans, #v-chans {
   position: absolute; left: 0; top: 0; width: 156px; height: 219px;
   background: #184359;
 }
-#stripe {
+#stripe, #v-stripe {
   position: absolute; left: 156px; top: 0; width: 8px; height: 219px;
   background: linear-gradient(90deg, #6a7fcf 0, #cfd3ea 1px, #f7f8fb 2px, #f7f8fb 5px, #c6c6c6 5px, #616161 6px, #000 7px, #0a0c22 8px);
 }
-#progs {
+#progs, #v-list {
   position: absolute; left: 164px; top: 0; right: 0; height: 219px;
   background: #969695;
   overflow: hidden;
 }
-#progs::before { /* gray/dark edge left of the program cells */
+#progs::before, #v-list::before { /* gray/dark edge left of the program cells */
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: #4c4c66;
 }
 
@@ -213,7 +215,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 }
 .cell.sel span { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; font-size: 24.5px; letter-spacing: .3px; }
 
-#footer {
+#footer, #v-foot {
   position: absolute; left: 0; top: 512px; width: var(--W); height: 88px;
   background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
   border-top: 1px solid #7f8796;
@@ -286,13 +288,51 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #osd-num.show { display: block; }
 
 /* ------------------------------------------------------- guide extras */
-#empty {
+#empty, #v-empty {
   position: absolute; left: 164px; top: 0; right: 0; height: 219px;
   display: none; align-items: center; justify-content: center; text-align: center;
   padding: 0 40px; background: linear-gradient(#14364c, #18374c);
   font-size: 26px; line-height: 30px; text-shadow: var(--shadow);
 }
-#empty.show { display: flex; }
+#empty.show, #v-empty.show { display: flex; }
+
+/* ------------------------------------------------------------- on demand */
+/* Like the original's list screens ("HDTV by Time", "Digital Music"): the
+   time bar becomes a title bar, its right end a ◀ choice ▶ (here the list's
+   order or a genre), and the listings become one title per row, shorter than
+   the grid's, beside a light column like the channel column (the year, the
+   episode). The bar, column, stripe, cells and footer are the guide's own
+   (grouped with them above). */
+#v-bar > * { position: absolute; }
+#v-icon { left: 56px; top: 4px; width: 34px; height: 26px; filter: drop-shadow(1.5px 1.5px 0 #000); }
+#v-title, #v-view { top: 4px; font-size: 27px; line-height: 28px; text-shadow: var(--shadow); white-space: nowrap; overflow: hidden; }
+#v-title { left: 100px; max-width: calc(var(--W) - 124px); }
+#v-bar.views #v-title { max-width: calc(var(--W) - 418px); }
+#v-bar:not(.views) .v-pick { display: none; }
+#v-sep { left: calc(var(--W) - 304px); }
+#v-prev, #v-next { top: 10px; width: 10px; height: 16px; cursor: pointer; filter: drop-shadow(1.5px 1.5px 0 #000); }
+#v-prev { left: calc(var(--W) - 286px); }
+#v-next { left: calc(var(--W) - 34px); }
+#v-view { left: calc(var(--W) - 268px); width: 226px; text-align: center; }
+
+.v-num {
+  position: absolute; left: 0; width: 156px; height: 41px; cursor: pointer;
+  background: linear-gradient(#5f7bd0, #5d78cd 60%, #5672c3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(0,0,0,.18);
+  color: var(--chan-text); -webkit-text-stroke: 0;
+  font-size: 22px; line-height: 42px; text-align: center; white-space: nowrap;
+}
+.v-num span { display: inline-block; }
+#v-list .cell { left: 0; right: 0; height: 41px; }
+#v-list .cell.blank { cursor: default; }
+.v-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; font-size: 26.5px; line-height: 30px; text-shadow: var(--shadow); }
+.v-tag { flex: none; margin: 0 6px 0 12px; font-size: 21px; color: #a9bcd8; white-space: nowrap; text-shadow: var(--shadow); }
+.cell.sel .v-t { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; font-size: 24.5px; letter-spacing: .3px; }
+.cell.sel .v-tag { color: #46523a; text-shadow: none; -webkit-text-stroke: 0; }
+
+#v-hint, #v-pos { position: absolute; top: 30px; font-size: 21px; line-height: 26px; white-space: nowrap; text-shadow: var(--shadow); color: #c3cde0; }
+#v-hint { left: 56px; }
+#v-pos { right: 24px; }
 
 /* -------------------------------------------------------------- settings */
 /* Full screen: header, title bar, category column beside the rows (like the
@@ -463,6 +503,12 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #dlg-body { padding: 12px 20px 18px; }
 #dlg-text { font-size: 22px; line-height: 27px; margin-bottom: 12px; white-space: pre-line; text-shadow: var(--shadow); }
 #dlg-text.err { color: #ffb39a; }
+/* a code to type in somewhere else (Plex's link code) */
+#dlg-big {
+  display: none; margin: 0 0 14px; text-align: center;
+  font-size: 60px; line-height: 66px; letter-spacing: 10px; color: var(--lime); text-shadow: 2px 2px 1px rgba(0,0,0,.85);
+}
+#dlg-big.show { display: block; }
 .dlg-field { margin-bottom: 12px; }
 .dlg-label { font-size: 21px; line-height: 26px; margin-bottom: 4px; text-shadow: var(--shadow); }
 .dlg-field input {

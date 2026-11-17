@@ -75,6 +75,32 @@
     <div id="footer"></div>
   </div>
 
+  <!-- ===================== ON DEMAND =====================
+       Replaces the guide's listings below the shared top half: a title bar
+       (◀ ▶ picks the order or a genre), then the list. -->
+  <div id="vod">
+    <div id="v-bar">
+      <svg id="v-icon" viewBox="0 0 34 26" aria-hidden="true">
+        <rect x="1" y="1" width="32" height="24" rx="4" fill="#fff"/>
+        <path d="M13,6.5 L23.5,13 L13,19.5 Z" fill="#0b2a4f"/>
+      </svg>
+      <div id="v-title"></div>
+      <div class="tb-sep v-pick" id="v-sep"></div>
+      <svg id="v-prev" class="v-pick" viewBox="0 0 10 16" aria-label="Previous"><path d="M9,1 L1,8 L9,15 Z" fill="#fff"/></svg>
+      <div id="v-view" class="v-pick"></div>
+      <svg id="v-next" class="v-pick" viewBox="0 0 10 16" aria-label="Next"><path d="M1,1 L9,8 L1,15 Z" fill="#fff"/></svg>
+    </div>
+
+    <div id="v-grid">
+      <div id="v-chans"></div>
+      <div id="v-stripe"></div>
+      <div id="v-list"></div>
+      <div id="v-empty"></div>
+    </div>
+
+    <div id="v-foot"><div id="v-hint"></div><div id="v-pos"></div></div>
+  </div>
+
   <!-- ===================== SETTINGS (full screen) ===================== -->
   <div id="menu">
     <div id="m-hdr">
@@ -132,6 +158,7 @@
     <div id="pb-ctl">
       <div class="pb-btn txt" data-act="subs" title="Subtitle Options (Shift+C)">CC</div>
       <div class="pb-btn txt" data-act="screen" title="Display Options (Shift+F)">Display</div>
+      <div class="pb-btn txt" data-act="ondemand" title="On Demand (O)">On Demand</div>
       <div class="pb-btn txt" data-act="menu" title="Settings (F1)">Settings</div>
     </div>
     <div id="pb-top">
@@ -163,6 +190,7 @@
       <div id="dlg-title"></div>
       <div id="dlg-body">
         <div id="dlg-text"></div>
+        <div id="dlg-big"></div>
         <div id="dlg-items"></div>
       </div>
     </div>
@@ -184,5 +212,7 @@
 <script src="js/player.js"></script>
 <script src="js/main.js"></script>
 <script src="js/settings.js"></script>
+<script src="js/ondemand.js"></script>
+<script src="js/plex.js"></script>
 </body>
 </html>

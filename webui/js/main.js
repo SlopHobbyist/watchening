@@ -1,5 +1,6 @@
 /*
- * iGuide-style IPTV viewer: program guide, full-screen player, settings.
+ * iGuide-style IPTV viewer: program guide, full-screen player, On Demand
+ * (ondemand.js), settings.
  *
  * Everything works from a TV remote's D-pad, OK and Back alone:
  *   watching        Up / Down channel · Left / Right back / ahead 5s
@@ -12,13 +13,13 @@
  * Keys (watching): also W / S channel · A / D 5s · J ahead 10s · L back 10s · 0-9 tune
  *                  Space / K play/pause · C captions on/off · Shift+C subtitle options
  *                  Shift+F display options · M mute · F full screen · G guide
- *                  I info · P controls
+ *                  O On Demand · I info · P controls
  *                  Esc / Backspace work as Back
  *                  (also: PgUp/PgDn channel,
  *                   [ ] subtitle offset -/+0.1s, { } 1s, \ reset, media keys,
  *                   remote Guide / Info / Captions / Settings keys)
  * Keys (menus):    arrows / WASD move · Enter OK · Esc / Backspace back
- *                  guide: Shift+Left/Right -/+ 1 day · PgUp/PgDn page · 0-9 channel
+ *                  guide: Shift+Left/Right -/+ 1 day · PgUp/PgDn page · 0-9 channel · O On Demand
  * Anywhere:        F1 settings
  * Mouse:           click a listing to select it, click again to tune · wheel scrolls
  *                  click the picture to watch; while watching, move the mouse
@@ -52,7 +53,7 @@
     guide: null,       // merged XMLTV data
     epgStatus: "",
     epgBusy: false,
-    mode: "guide",     // guide | watch | menu
+    mode: "guide",     // guide | watch | menu | vod (On Demand's lists)
   });
   let epoch = 0, horizon = 0;
   function setWindow() {
@@ -105,12 +106,20 @@
     ws: U.floorSlot(Date.now()), // window start
     focus: Date.now(),           // time the cursor sits on
     tunedKey: null,
+    vod: null,       // the On Demand title playing (a channel-like object, see ondemand.js), or null
     entry: "", entryTimer: 0,
   };
   const nowSlot = () => U.floorSlot(Date.now());
   const rowOf = (idx) => (idx - S.top + N()) % N();
   const tunedIdx = () => App.channels.findIndex((c) => c.key === S.tunedKey);
   const tunedCh = () => App.all.find((c) => c.key === S.tunedKey) || null;
+  /** What's on the picture: an On Demand title, else the tuned channel. */
+  const playing = () => S.vod || tunedCh();
+  App.vod = () => S.vod;
+  /** "23 ESPN", or for On Demand "S1 E3" / the year. */
+  const chanText = (ch) => (ch.vod ? ch.call : `${ch.n} ${ch.call}`);
+  /** Channel key for per-channel options (none for On Demand). */
+  const optKey = () => (S.vod ? null : S.tunedKey);
 
   // ------------------------------------------------------------------ render
   const els = {
@@ -164,6 +173,7 @@
     else if (p && p.rating) s += badgeBox(p.rating);
     return s;
   }
+  App.badgeHtml = (hd, rating) => badges({ hd }, rating ? { rating } : null);
 
   /** Fill the info panel (top left). Shared with the settings screen. */
   App.showInfo = function ({ title = "", chan = "", time = "", icons = "", desc = "" }) {
@@ -243,7 +253,9 @@
       els.empty.classList.add("show");
       els.empty.textContent = App.all.length
         ? "All channels are hidden. Press OK for Settings to show them."
-        : "No channels yet. Press OK for Settings to add an M3U playlist.";
+        : OnDemand.hasSources()
+          ? "No channels yet. Press OK for On Demand. Add an M3U playlist in Settings (F1)."
+          : "No channels yet. Press OK for Settings to add an M3U playlist.";
       App.showInfo({
         title: "Welcome",
         desc: "Add an IPTV playlist (M3U or M3U8) from a web address or a file on this computer, then come back here to browse.",
@@ -373,12 +385,15 @@
     App.mode = m;
     stage.classList.toggle("watching", m === "watch");
     stage.classList.toggle("in-menu", m === "menu");
+    stage.classList.toggle("in-vod", m === "vod");
     document.body.classList.toggle("watching", m === "watch");
     document.body.classList.toggle("in-menu", m === "menu");
+    $("tvl").textContent = m === "vod" ? "On Demand" : "TV Listings";
     if (m !== "watch") { hideBanner(); hidePbar(); Panel.close(); }
     layoutTv();
   }
   App.openGuide = function () {
+    stopVod();
     setMode("guide");
     S.ws = nowSlot();
     S.focus = Date.now();
@@ -389,7 +404,8 @@
     renderGrid();
   };
   App.watch = function () {
-    if (!N()) return App.openMenu();
+    if (S.vod) { setMode("watch"); showBanner(); return; }
+    if (!N()) return OnDemand.hasSources() ? App.openOnDemand() : App.openMenu();
     if (tunedIdx() < 0) tune(Math.min(S.sel, N() - 1));
     setMode("watch");
     showBanner();
@@ -402,11 +418,62 @@
     Settings.open(page);
   };
   App.closeMenu = function () {
-    if (menuFrom === "watch" && N()) App.watch();
+    if (menuFrom === "watch" && (N() || S.vod)) App.watch();
+    else if (menuFrom === "vod") App.openOnDemand();
     else App.openGuide();
   };
+
+  /*
+   * On Demand: its lists replace the guide's listings (the header, info and
+   * picture stay). A title plays full screen like a channel, with the same
+   * banner and controls; Back (or the end of it) returns to the lists and
+   * the picture goes back to the channel you were on.
+   */
+  let vodFrom = "guide";
+  App.openOnDemand = function () {
+    if (!S.vod && (App.mode === "guide" || App.mode === "watch")) vodFrom = App.mode;
+    stopVod();
+    setMode("vod");
+    OnDemand.open();
+  };
+  /** Back from On Demand's top list: to the guide, or the picture it was opened from. */
+  App.closeOnDemand = function () {
+    if (vodFrom === "watch" && N()) App.watch();
+    else App.openGuide();
+  };
+  /** Play an On Demand title. `replace`: the same title again (another
+   *  subtitle drawn in), keeping its place and the controls. */
+  App.playVod = function (ch, replace) {
+    if (!replace) endVod();
+    S.vod = ch;
+    endScrub(false);
+    Player.load(ch);
+    Player.setOffset(0);
+    Player.setScreen(screenFor(null));
+    if (replace) return;
+    setMode("watch");
+    showBanner();
+  };
+  /** Stop the On Demand title, if any, telling its server where it got to. */
+  function endVod() {
+    const v = S.vod;
+    if (!v) return null;
+    S.vod = null;
+    OnDemand.stopped(v);
+    return v;
+  }
+  /** Stop the On Demand title and put the channel back on. */
+  function stopVod() {
+    if (!endVod()) return;
+    const i = tunedIdx();
+    if (i >= 0) tune(i);
+    else if (N()) tune(U.clamp(S.sel, 0, N() - 1));
+    else Player.stop();
+  }
+  App.stopVod = stopVod;
+
   function enter() {
-    if (!N()) return App.openMenu();
+    if (!N()) return OnDemand.hasSources() ? App.openOnDemand() : App.openMenu();
     const ch = App.channels[S.sel];
     if (ch.key !== S.tunedKey) tune(S.sel);
     App.watch();
@@ -463,6 +530,7 @@
   function tune(idx) {
     const ch = App.channels[idx];
     if (!ch) return;
+    endVod();
     S.tunedKey = ch.key;
     Store.cfg.last = ch.key;
     Store.save();
@@ -478,6 +546,7 @@
   };
   function surf(d) {
     const n = N();
+    if (S.vod) return showPbar(); // On Demand: no channels to change; show where it's at
     if (!n) return;
     const i = tunedIdx();
     tune(((i < 0 ? 0 : i) + d + n) % n);
@@ -493,20 +562,29 @@
   // ------------------------------------------------------------------ banner
   // ms 0 holds the banner up until the controls close (the Info button)
   let bannerTimer = 0, bannerHold = false;
+  /** On Demand's time line: "1h 52m · Ends at 9:42p" */
+  function vodTime(ch) {
+    const len = OnDemand.fmtLen(ch.dur);
+    if (Player.loading || !ch.dur) return len;
+    const end = U.fmtSlot(Date.now() + Math.max(0, ch.dur - Player.time()) * 1000);
+    return [len, `Ends at ${end}`].filter(Boolean).join(" · ");
+  }
+
   function showBanner(ms = 5000) {
-    const ch = tunedCh();
+    const ch = playing();
     if (!ch || App.mode !== "watch") return;
-    const p = programAt(ch, Date.now());
+    const p = ch.vod ? null : programAt(ch, Date.now());
     const chanEl = $("b-chan"), titleEl = $("b-title");
     renderClock();
     $("banner").classList.add("show");
-    fitText(chanEl, `${ch.n} ${ch.call}`, true);
+    fitText(chanEl, chanText(ch), true);
     titleEl.style.maxWidth = Math.max(160, $("banner").offsetWidth - 182 - chanEl.offsetWidth - 58 - 18) + "px";
-    fitText(titleEl, p.empty ? ch.name : p.title, true);
-    $("b-time").textContent = Player.error ? "No Signal" : p.none ? ch.group || "Live" : U.fmtRange(p.start, p.end);
+    fitText(titleEl, !p || p.empty ? ch.name : p.title, true);
+    $("b-time").textContent = Player.error ? "No Signal" : !p ? vodTime(ch) : p.none ? ch.group || "Live" : U.fmtRange(p.start, p.end);
     const desc = Player.error
       ? Player.error
-      : Player.loading ? "Tuning..." : p.none ? (p.empty ? ch.name : "No program information.") : describe(p);
+      : Player.loading ? (p ? "Tuning..." : "Starting...")
+        : !p ? ch.desc : p.none ? (p.empty ? ch.name : "No program information.") : describe(p);
     fitText($("b-desc"), desc, true);
     clearTimeout(bannerTimer);
     if (ms === 0) bannerHold = true;
@@ -534,6 +612,7 @@
    *  showing, the guide. */
   function back() {
     if (bannerShown() || pbarShown()) { hideBanner(); hidePbar(); }
+    else if (S.vod) App.openOnDemand();
     else App.openGuide();
   }
 
@@ -564,7 +643,7 @@
   const btnIdx = (a) => Math.max(0, BTNS.findIndex((b) => b.dataset.act === a));
   /** Open the controls with focus; `act` focuses that button. */
   function openCtl(act) {
-    if (App.mode !== "watch" || !tunedCh()) return;
+    if (App.mode !== "watch" || !playing()) return;
     if (!ctl.on || act) {
       ctl.on = true;
       ctl.row = Player.range() && !act ? "bar" : "btns";
@@ -625,7 +704,7 @@
   }
 
   function showPbar(ms) {
-    if (App.mode !== "watch" || !tunedCh()) return;
+    if (App.mode !== "watch" || !playing()) return;
     pb.root.classList.add("show");
     placeOverlays();
     renderPbar();
@@ -653,13 +732,13 @@
   }
 
   function renderPbar() {
-    const ch = tunedCh();
+    const ch = playing();
     if (!ch || !pbarShown()) return;
     const now = Date.now();
-    const p = programAt(ch, now);
-    fitText(pb.chan, `${ch.n} ${ch.call}`, true);
+    const p = ch.vod ? null : programAt(ch, now);
+    fitText(pb.chan, chanText(ch), true);
     pb.title.style.maxWidth = Math.max(160, pb.root.offsetWidth - 30 - pb.chan.offsetWidth - 20) + "px";
-    fitText(pb.title, p.empty ? ch.name : p.title, true);
+    fitText(pb.title, !p || p.empty ? ch.name : p.title, true);
 
     const r = Player.range();
     let left = "", right = "", frac = 1, pos = "";
@@ -672,11 +751,12 @@
       left = U.fmtSlot(now - (r.end - r.start) * 1000); right = "Live";
       pos = behind < 15 ? "Live" : "-" + U.fmtDur(behind);
       frac = (t - r.start) / (r.end - r.start);
-    } else if (!p.none) {
+    } else if (p && !p.none) {
       left = U.fmtSlot(p.start); right = U.fmtSlot(p.end); pos = U.fmtSlot(now);
       frac = (now - p.start) / (p.end - p.start);
     } else {
-      pos = Player.error ? "No Signal" : Player.loading ? "Tuning" : "Live";
+      pos = Player.error ? "No Signal" : Player.loading ? (p ? "Tuning" : "Starting") : p ? "Live" : "";
+      if (!p) frac = 0;
     }
     frac = U.clamp(frac || 0, 0, 1);
     pb.left.textContent = left;
@@ -725,8 +805,12 @@
     rew() { act.skip(-10); },
     ff() { act.skip(10); },
     cc() {
+      const v = S.vod;
+      if (v && v.burn) { OnDemand.chooseSub(null); return; } // subtitles drawn into the picture
       const label = Player.toggleCC();
-      if (label === null) osd("No subtitles in this stream. See Subtitles for more options.", 4000);
+      const file = v && v.subs.find((x) => x.url);
+      if (label === null && file) OnDemand.chooseSub(file);
+      else if (label === null) osd("No subtitles in this stream. See Subtitles for more options.", 4000);
       else osd(label === "Off" ? "Subtitles Off" : `Subtitles: ${label}`);
       if (pbarShown()) renderPbar();
     },
@@ -745,6 +829,7 @@
     },
     mute() { osd(Player.toggleMute() ? "Mute" : "Sound On"); },
     guide() { App.openGuide(); },
+    ondemand() { App.openOnDemand(); },
     fullscreen() {
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       else document.documentElement.requestFullscreen().catch(() => {});
@@ -758,7 +843,7 @@
   /** Subtitle offset, remembered per channel. */
   function setOffset(sec) {
     const o = Player.setOffset(sec);
-    const key = S.tunedKey;
+    const key = optKey();
     if (key) {
       if (o) Store.cfg.ccOffsets[key] = o; else delete Store.cfg.ccOffsets[key];
       Store.save();
@@ -768,15 +853,30 @@
 
   const CC_SIZES = ["Small", "Medium", "Large"];
   function subtitleRows() {
-    const tracks = Player.ccTracks();
-    const rows = [{ label: "Off", check: !Player.cc, desc: "No subtitles.", act: () => Player.setTrack(null) }];
+    const v = S.vod;
+    const vodSubs = v ? v.subs : [];
+    // a subtitle file from the server has its own row, not a loaded file's
+    const fromServer = (x) => x.t === Player.EXT && vodSubs.some((s) => s.url && s.label === Player.extName);
+    const tracks = Player.ccTracks().filter((x) => !fromServer(x));
+    const rows = [{
+      label: "Off", check: !Player.cc && !(v && v.burn), desc: "No subtitles.",
+      act: () => (v && v.burn ? OnDemand.chooseSub(null) : Player.setTrack(null)),
+    }];
+    for (const s of vodSubs) {
+      rows.push({
+        label: s.label, check: OnDemand.subOn(s),
+        desc: s.url ? "A subtitle file on the server."
+          : "Subtitles inside the video, drawn into the picture by the server. Changing them starts the picture again where it was.",
+        act: () => OnDemand.chooseSub(s),
+      });
+    }
     for (const x of tracks) {
       const t = x.t;
       const desc = t === Player.EXT ? "Subtitles from a file on this computer."
         : (t.kind === "captions" ? "Closed captions" : "Subtitles") + (t.language ? ` (${t.language})` : "") + " sent by this channel.";
       rows.push({ label: x.label, check: Player.cc === t, desc, act: () => Player.setTrack(t) });
     }
-    if (!tracks.length) {
+    if (!tracks.length && !vodSubs.length) {
       rows.push({ label: "None in this stream", disabled: true });
     }
     rows.push({ sep: true });
@@ -810,7 +910,7 @@
   const cycle = (list, v, d) => list[(Math.max(0, list.findIndex((x) => x[0] === v)) + d + list.length) % list.length][0];
 
   function changeScreen(patch) {
-    const key = S.tunedKey;
+    const key = optKey();
     const own = key && Store.cfg.screenCh[key];
     Object.assign(own || Store.cfg.screen, patch);
     Store.save();
@@ -834,7 +934,7 @@
       : [row("Overscan", x, "overscan", OS_DESC), split];
   }
   function screenRows() {
-    const sc = Player.screen, key = S.tunedKey;
+    const sc = Player.screen, key = optKey();
     const own = !!(key && Store.cfg.screenCh[key]);
     const src = Player.videoSize();
     const opt = (label, list, prop, desc) => ({
@@ -859,12 +959,11 @@
       }[sc.crop]),
       ...overscanRows(sc),
       { sep: true },
-      {
+      key && {
         label: "Apply To", value: own ? "This Channel" : "All Channels",
         desc: own ? "These settings are only for this channel. Other channels use the settings for all channels."
           : "These settings are for every channel without settings of its own. Choose This Channel to set this one apart.",
         step: () => {
-          if (!key) return;
           if (own) delete Store.cfg.screenCh[key];
           else Store.cfg.screenCh[key] = Object.assign({}, sc);
           Store.save();
@@ -877,7 +976,7 @@
         desc: "Fill the whole display, hiding the browser's toolbars. Also F, or double-click the picture.",
         step: () => act.fullscreen(),
       }] : []),
-    ];
+    ].filter(Boolean);
   }
   document.addEventListener("fullscreenchange", () => Panel.refresh());
 
@@ -887,7 +986,7 @@
   };
   function togglePanel(id, fromCtl) {
     if (Panel.id() === id) return Panel.close();
-    if (App.mode !== "watch" || !tunedCh()) return;
+    if (App.mode !== "watch" || !playing()) return;
     hideBanner();
     hidePbar();
     Panel.open(Object.assign({ id, onBack: fromCtl ? () => openCtl(id) : null }, PANELS[id]));
@@ -906,6 +1005,7 @@
       if (pbarShown()) renderPbar();
       if (type === "state" && App.mode === "watch" && bannerShown() && !Player.loading) showBanner();
     }
+    if (type === "ended" && S.vod && Player.ch === S.vod) App.openOnDemand();
     if (type === "cc" || type === "tracks" || type === "size") Panel.refresh();
   });
 
@@ -948,6 +1048,7 @@
       case "i": case "Info": act.info(); break;
       case "p": pbarShown() && ctl.on ? hidePbar() : openCtl(); break;
       case "g": case "Guide": case "ContextMenu": App.openGuide(); break;
+      case "o": App.openOnDemand(); break;
       case "[": act.offset(-0.1); break;
       case "]": act.offset(0.1); break;
       case "{": act.offset(-1); break;
@@ -972,6 +1073,7 @@
       case "PageDown": case "ChannelDown": page(1); break;
       case " ": enter(); break;
       case "g": case "G": case "Guide": if (N()) App.watch(); break;
+      case "o": case "O": App.openOnDemand(); break;
       default: return false;
     }
     return true;
@@ -992,6 +1094,7 @@
       return;
     }
     if (App.mode === "menu") { if (Settings.key(e)) e.preventDefault(); return; }
+    if (App.mode === "vod") { if (OnDemand.key(e)) e.preventDefault(); return; }
     if (App.mode === "watch" && Panel.key(e)) { e.preventDefault(); return; }
     if (/^[0-9]$/.test(k)) { digit(k); e.preventDefault(); return; }
     let handled = true;
@@ -1042,15 +1145,16 @@
     const d = Math.sign(wheelAcc);
     wheelAcc = 0;
     if (App.mode === "menu") Settings.wheel(d);
+    else if (App.mode === "vod") OnDemand.wheel(d);
     else if (App.mode === "watch") Panel.isOpen() ? Panel.move(d) : surf(d);
     else moveVert(d);
   }, { passive: true });
 
-  // the picture: from the guide it starts watching; while watching it toggles the bar
+  // the picture: from the guide (or On Demand) it starts watching; while watching it toggles the bar
   let clickTimer = 0;
   tv.addEventListener("click", () => {
     if (App.mode !== "watch") {
-      if (App.mode === "guide") App.watch();
+      if (App.mode === "guide" || App.mode === "vod") App.watch();
       return;
     }
     if (Panel.isOpen()) return Panel.close();
@@ -1157,9 +1261,11 @@
     App.channels = list.filter((c) => !c.hidden);
     attachGuide();
 
-    // keep watching the same channel if it still exists
+    // keep watching the same channel if it still exists (an On Demand title
+    // keeps playing: the channel comes back on when it stops)
     const t = tunedCh();
-    if (t && !t.hidden) Player.ch = t;
+    if (S.vod) { /* playing On Demand */ }
+    else if (t && !t.hidden) Player.ch = t;
     else if (S.tunedKey) {
       if (N()) tune(Math.min(Math.max(0, S.sel), N() - 1));
       else { S.tunedKey = null; Player.stop(); }
@@ -1177,6 +1283,7 @@
   function refreshViews() {
     if (App.mode === "guide") renderGrid();
     else if (App.mode === "menu") Settings.render();
+    else if (App.mode === "vod") OnDemand.render();
   }
   App.refreshViews = refreshViews;
 
@@ -1414,7 +1521,8 @@
       App.openGuide();
     } else {
       Player.stop();
-      App.openMenu(0);
+      if (OnDemand.hasSources()) App.openOnDemand();
+      else App.openMenu(0);
     }
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(refreshViews);
 
@@ -1428,6 +1536,6 @@
     }
     App.loadGuideData(false);
   }
-  // settings.js loads after this file
+  // settings.js, ondemand.js and its sources load after this file
   window.addEventListener("DOMContentLoaded", boot);
 })();

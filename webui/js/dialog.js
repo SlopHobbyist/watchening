@@ -2,8 +2,10 @@
  * Modal pop-up in the guide's style: a title strip, optional message, text
  * fields and a vertical list of choices (highlighted like a selected listing).
  *
- *   Dialog.open({ title, text, fields: [{ id, label, value, placeholder }],
+ *   Dialog.open({ title, text, big, fields: [{ id, label, value, placeholder }],
  *                 buttons: [{ label, act(values) }], onCancel })
+ *   (big: a line of large text under the message, such as a code to type in;
+ *    Dialog.big() changes it while open)
  *
  * A button's act() may return false (or a promise of false) to keep the
  * dialog open, e.g. after Dialog.message("That URL didn't work", true).
@@ -11,7 +13,7 @@
 (function () {
   "use strict";
   const { $ } = U;
-  const root = $("dlg"), titleEl = $("dlg-title"), textEl = $("dlg-text"), itemsEl = $("dlg-items");
+  const root = $("dlg"), titleEl = $("dlg-title"), textEl = $("dlg-text"), bigEl = $("dlg-big"), itemsEl = $("dlg-items");
   let cur = null;
 
   function open(opts) {
@@ -20,6 +22,7 @@
     const c = cur;
     titleEl.textContent = opts.title || "";
     message(opts.text || "");
+    big(opts.big || "");
     itemsEl.replaceChildren();
 
     for (const f of opts.fields || []) {
@@ -123,6 +126,11 @@
     textEl.classList.toggle("err", !!isError);
   }
 
+  function big(text) {
+    bigEl.textContent = text || "";
+    bigEl.classList.toggle("show", !!text);
+  }
+
   /** Keyboard input while open. Returns true when the dialog consumed it. */
   function key(e) {
     if (!cur) return false;
@@ -147,5 +155,10 @@
   // click on the dimmed backdrop cancels
   root.addEventListener("click", (e) => { if (e.target === root) cancel(); });
 
-  window.Dialog = { open, close, key, message, confirm, isOpen: () => !!cur };
+  window.Dialog = {
+    open, close, key, message, big, confirm,
+    isOpen: () => !!cur,
+    /** Whether the dialog opened with these options is still the one showing. */
+    is: (opts) => !!cur && cur.opts === opts,
+  };
 })();
