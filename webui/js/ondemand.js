@@ -1,10 +1,12 @@
 /*
- * On Demand: movies and shows from media servers, browsed in the guide's
- * style. The guide's header, info panel and picture stay; below them a title
- * bar (like the guide's time bar) names the list, with ◀ ▶ picking its order
- * or a genre as the original's list screens did ("HDTV by Time ◀ 7:00pm ▶"),
- * and the list runs in rows like theirs: a light column on the left (the
- * year, the episode) beside each title, colored as in the guide.
+ * On Demand: movies and shows from media servers, browsed like the original
+ * box's ON DEMAND Menu. The guide's header, info panel and picture stay (the
+ * info panel's first line names the screen: "ON DEMAND Menu", "Movies");
+ * below them, menus are rounded buttons two to a row, and lists of titles one
+ * wide button per row with the episode or year and how much is left, with
+ * "More ▼ Choices" under them when the list goes on. A library opens a menu
+ * of its orders and genres ("A-Z", "Recently Added", "Comedy"), as the
+ * original's categories opened into sub-categories.
  *
  * Sources are pluggable: Store.cfg.vod.sources holds { id, type, name, ... }
  * and the provider for its type (OnDemand.register) does the talking.
@@ -15,7 +17,7 @@
  *     describe(src)                       a line about a source, for Settings
  *     reconnect(src)                      find the server again (optional)
  *     root(src)                -> [item]  its libraries and folders
- *     views(src, item)         -> [{ id, label }] | null   orders / genres of a list
+ *     views(src, item)         -> [{ id, label }] | null   a library's orders / genres (its menu)
  *     list(src, item, view)    -> { items, total, next() -> [item] | null }
  *     play(src, item, { fromStart, at, burn })
  *                              -> { url, start, dur, subs: [{ id, label, url, selected }], burn }
@@ -32,16 +34,15 @@
  *            watched, desc, hd, stars (0-5), show, season, episode, count,
  *            unwatched, seasons, aired ("2008-01-20"), cat (movie | kids | sports | "") }
  *
- * Keys: ▲▼ select · ◀▶ order / genre (where there's a choice; else ◀ goes
- *       back) · OK open or play · Back up a level, and from the top back to
- *       wherever On Demand was opened from · PgUp/PgDn page · O closes
+ * Keys: ▲▼◀▶ select (in a list of titles ◀ goes back) · OK open or play ·
+ *       Back up a level, and from the top back to wherever On Demand was
+ *       opened from · PgUp/PgDn page · O closes
  */
 (function () {
   "use strict";
   const { $ } = U;
-  const ROWS = 5;
-  const ROW_TOP = [2, 46, 89, 133, 176]; // row offsets inside #v-grid (41px rows)
-  const LEFT_W = 142;                    // text room in the left column
+  const ROWS = 5;                      // button rows on screen
+  const ROW_TOP = (k) => 18 + k * 52;  // a button row's offset inside #v-menu
 
   const providers = {};
   /** Saved sources whose provider is loaded. */
@@ -62,17 +63,21 @@
   // ---------------------------------------------------------------- levels
   /*
    * The screens you've gone through, top one showing:
-   *   { root, title, src, item, rows, total, sel, top, views, view,
+   *   { root, title, src, item, view, pick, rows, total, sel, top,
    *     loading, error, stale, run }
-   * views is undefined until asked for, then null (none) or a list.
+   * pick: a library's menu of its orders and genres (its rows carry a view);
+   * view: the order or genre a list was opened with. top is the first button
+   * row on screen.
    */
   const OD = { stack: [] };
   const cur = () => OD.stack[OD.stack.length - 1];
   function level(o) {
-    return Object.assign({ rows: [], total: 0, sel: 0, top: 0, views: undefined, view: 0, loading: true, error: "", stale: false, run: 0 }, o);
+    return Object.assign({ rows: [], total: 0, sel: 0, top: 0, view: null, pick: false, loading: true, error: "", stale: false, run: 0 }, o);
   }
-  const hasViews = (lv) => !!(lv.views && lv.views.length > 1);
-  const viewKey = (lv) => `${lv.src.id}:${lv.item.id}`;
+  const viewKey = (src, it) => `${src.id}:${it.id}`;
+  /** Titles get one wide button per row; menus two narrow ones. */
+  const isWide = (lv) => lv.rows.some((r) => r.item && playable(r.item));
+  const cols = (lv) => (isWide(lv) ? 1 : 2);
 
   // ------------------------------------------------------------ formatting
   /** 6720 -> "1h 52m" */
@@ -99,11 +104,10 @@
   const playable = (it) => it.type === "movie" || it.type === "episode";
   const hasResume = (it) => it.offset > 5 && !(it.dur && it.offset > it.dur - 30);
 
+  /** The note before a title on its button: the episode, or the year. */
   function leftText(src, it) {
     switch (it.type) {
-      case "library": case "folder": return srcLabel(src);
-      case "movie": case "show": return it.year ? String(it.year) : "";
-      case "season": return it.count ? `${it.count} Ep${it.count === 1 ? "" : "s"}` : "";
+      case "movie": return it.year ? String(it.year) : "";
       case "episode": return epCode(it);
     }
     return "";
@@ -138,7 +142,7 @@
         const what = it.kind === "show" ? "TV shows" : "Movies";
         return {
           title: it.title, chan: srcLabel(src), time: it.kind === "show" ? "TV Shows" : "Movies",
-          desc: `${what} on ${src.name}. In the list, ◀ ▶ changes the order or picks a genre.`,
+          desc: `${what} on ${src.name}, from A to Z, newest first, or by genre.`,
         };
       }
       case "folder":
@@ -170,16 +174,16 @@
   }
 
   // ------------------------------------------------------------------ rows
-  /** A list row: { src, item, left, text, tag, cat } or, for things that
-   *  aren't titles, { left, text, info, act }. */
-  const row = (src, it) => ({ src, item: it, left: leftText(src, it), text: it.label || it.title, tag: tagText(it), cat: it.cat || "" });
+  /** A button: { src, item, left, text, tag } or, for things that aren't
+   *  titles, { text, info, act } (or { text, view } in a library's menu). */
+  const row = (src, it) => ({ src, item: it, left: leftText(src, it), text: it.label || it.title, tag: tagText(it) });
 
   /** With no sources: the ways to add one. */
   function setupRows() {
     const out = [];
     for (const [type, p] of Object.entries(providers)) {
       for (const s of p.setup || []) {
-        out.push({ left: p.label, text: s.text, info: { title: s.text, chan: p.label, desc: s.desc }, act: s.act, type });
+        out.push({ text: s.text, info: { title: s.text, chan: p.label, desc: s.desc }, act: s.act, type });
       }
     }
     return out;
@@ -188,14 +192,16 @@
   async function rootRows() {
     const srcs = sources();
     if (!srcs.length) return setupRows();
+    const several = srcs.length > 1;
     const per = await Promise.all(srcs.map(async (src) => {
       try {
         const items = await providers[src.type].root(src);
-        if (items.length) return items.map((it) => row(src, it));
-        return [{ left: srcLabel(src), text: `${src.name}: No Movies or Shows`, info: { title: src.name, desc: "This server has no movie or TV show libraries." } }];
+        // with more than one server, say whose "Movies" each one is
+        if (items.length) return items.map((it) => Object.assign(row(src, it), several ? { text: `${src.name}: ${it.title}` } : {}));
+        return [{ text: `${src.name}: No Movies or Shows`, info: { title: src.name, desc: "This server has no movie or TV show libraries." } }];
       } catch (e) {
         return [{
-          left: srcLabel(src), text: `${src.name}: Not Available`, warn: true,
+          text: `${src.name}: Not Available`, warn: true,
           info: { title: src.name, chan: "Not Available", desc: `${e.message}. OK tries again.` },
           act: () => load(cur()),
         }];
@@ -218,28 +224,42 @@
     try {
       let rows;
       if (OD.reported) await OD.reported;
+      let pickSel = -1;
       if (lv.root) rows = await rootRows();
       else {
         const p = providers[lv.src.type];
-        if (lv.views === undefined) {
-          const views = (await p.views(lv.src, lv.item)) || null;
+        if (lv.pick) {
+          // a library: its orders and genres, on the one picked last time
+          const views = (await p.views(lv.src, lv.item)) || [];
           if (run !== lv.run) return;
-          lv.views = views;
-          const saved = views && Store.cfg.vod.views[viewKey(lv)];
-          lv.view = Math.max(0, views ? views.findIndex((v) => v.id === saved) : 0);
+          if (views.length > 1) {
+            const it = lv.item;
+            rows = views.map((v) => ({
+              text: v.label, view: v,
+              info: { title: v.label, chan: srcLabel(lv.src), desc: `${it.title} on ${lv.src.name}: ${v.label}.` },
+            }));
+            pickSel = views.findIndex((v) => v.id === Store.cfg.vod.views[viewKey(lv.src, it)]);
+          } else {
+            lv.pick = false; // nothing to pick: straight to the list
+            lv.view = views[0] || null;
+          }
         }
-        res = await p.list(lv.src, lv.item, lv.views ? lv.views[lv.view] : null);
-        rows = res.items.map((it) => row(lv.src, it));
+        if (!rows) {
+          res = await p.list(lv.src, lv.item, lv.view);
+          rows = res.items.map((it) => row(lv.src, it));
+        }
       }
       if (run !== lv.run) return;
-      const keep = quiet && lv.rows[lv.sel] && lv.rows[lv.sel].item; // where it is now
+      const keep = quiet && lv.rows[lv.sel]; // where it is now
       lv.rows = rows;
       lv.total = res && res.total != null ? res.total : rows.length;
       lv.loading = false;
       if (keep) {
-        const i = rows.findIndex((r) => r.item && r.item.id === keep.id && r.item.type === keep.type);
+        const i = rows.findIndex((r) => keep.item
+          ? r.item && r.item.id === keep.item.id && r.item.type === keep.item.type
+          : r.text === keep.text);
         if (i >= 0) lv.sel = i;
-      }
+      } else if (pickSel >= 0) lv.sel = pickSel;
       render();
     } catch (e) {
       if (run !== lv.run) return;
@@ -279,10 +299,7 @@
   }
 
   // ----------------------------------------------------------------- render
-  const els = {
-    bar: $("v-bar"), title: $("v-title"), view: $("v-view"),
-    chans: $("v-chans"), list: $("v-list"), empty: $("v-empty"), hint: $("v-hint"), pos: $("v-pos"),
-  };
+  const els = { btns: $("v-btns"), empty: $("v-empty"), more: $("v-more"), hint: $("v-hint"), pos: $("v-pos") };
 
   function div(cls, text) {
     const d = document.createElement("div");
@@ -291,114 +308,91 @@
     return d;
   }
 
-  /** The left column's text, squeezed (or stretched a little) to fit, as the
-   *  guide's channel column does. */
-  function leftCell(text, k, onClick) {
-    const c = div("v-num");
-    c.style.top = ROW_TOP[k] + "px";
-    if (text) {
-      const s = document.createElement("span");
-      let t = text, w = U.textW(t, 22);
-      let sx = Math.min(1.12, LEFT_W / Math.max(1, w));
-      if (sx < 0.7) {
-        while (t.length > 2 && U.textW(t + "...", 22) * 0.7 > LEFT_W) t = t.slice(0, -1);
-        t = t.trimEnd() + "...";
-        sx = 0.7;
-      }
-      s.textContent = t;
-      s.style.transform = `scaleX(${sx.toFixed(3)})`;
-      c.appendChild(s);
-    }
-    if (onClick) c.addEventListener("click", onClick);
-    return c;
-  }
+  /** The info panel's first line: which screen this is. */
+  const headOf = (lv) => (lv.root ? "ON DEMAND Menu" : lv.title);
 
   function render() {
     if (App.mode !== "vod" || !cur()) return;
     const lv = cur();
-    const n = lv.rows.length;
+    const n = lv.rows.length, c = cols(lv), wide = c === 1;
+    const nRows = Math.ceil(n / c);
     lv.sel = U.clamp(lv.sel, 0, Math.max(0, n - 1));
-    if (lv.sel < lv.top) lv.top = lv.sel;
-    if (lv.sel >= lv.top + ROWS) lv.top = lv.sel - ROWS + 1;
-    lv.top = U.clamp(lv.top, 0, Math.max(0, n - ROWS));
+    const selRow = Math.floor(lv.sel / c);
+    if (selRow < lv.top) lv.top = selRow;
+    if (selRow >= lv.top + ROWS) lv.top = selRow - ROWS + 1;
+    lv.top = U.clamp(lv.top, 0, Math.max(0, nRows - ROWS));
 
-    // title bar
-    const views = hasViews(lv);
-    els.bar.classList.toggle("views", views);
-    U.fitText(els.title, lv.title, true);
-    if (views) U.fitText(els.view, lv.views[lv.view].label, true);
-
-    // rows, then blank ones to fill the list
-    const chans = document.createDocumentFragment(), cells = document.createDocumentFragment();
-    const toFit = [];
-    for (let k = 0; k < ROWS; k++) {
-      const i = lv.top + k, r = lv.rows[i];
-      const click = r && (() => {
+    // the buttons on screen; titles' episode / year column only when some have one
+    const first = lv.top * c, end = Math.min(n, (lv.top + ROWS) * c);
+    const lefts = wide && lv.rows.slice(first, end).some((r) => r.left);
+    const frag = document.createDocumentFragment(), toFit = [];
+    for (let i = first; i < end; i++) {
+      const r = lv.rows[i];
+      const b = div("v-btn " + (wide ? "wide" : "c" + (i % c)) + (i === lv.sel ? " sel" : "") + (r.warn ? " warn" : ""));
+      b.style.top = ROW_TOP(Math.floor(i / c) - lv.top) + "px";
+      if (lefts) b.appendChild(div("v-left", r.left || ""));
+      const t = div("v-t");
+      b.appendChild(t);
+      if (wide && r.tag) b.appendChild(div("v-tag", r.tag));
+      b.addEventListener("click", () => {
         if (lv.sel === i) choose();
         else { lv.sel = i; render(); }
       });
-      chans.appendChild(leftCell(r ? r.left : "", k, click));
-      const cell = div("cell" + (r ? (r.cat ? " " + r.cat : "") + (i === lv.sel ? " sel" : "") : " blank"));
-      cell.style.top = ROW_TOP[k] + "px";
-      if (r) {
-        const t = div("v-t");
-        cell.appendChild(t);
-        if (r.tag) cell.appendChild(div("v-tag", r.tag));
-        cell.addEventListener("click", click);
-        toFit.push([t, r.text]);
-      }
-      cells.appendChild(cell);
+      frag.appendChild(b);
+      toFit.push([t, r.text]);
     }
-    els.chans.replaceChildren(chans);
-    els.list.replaceChildren(cells);
+    els.btns.replaceChildren(frag);
     for (const [el, t] of toFit) U.fitText(el, t, true);
 
     const msg = n ? "" : lv.loading ? "Loading..." : lv.error ? lv.error : lv.root ? "Nothing to show." : "Nothing here.";
     els.empty.textContent = msg;
     els.empty.classList.toggle("show", !!msg);
+    els.more.classList.toggle("up", lv.top > 0);
+    els.more.classList.toggle("down", lv.top + ROWS < nRows || (!!n && lv.total > n));
 
     // info panel: the selection, or what's going on
+    const head = headOf(lv);
     const r = lv.rows[lv.sel];
-    if (r) App.showInfo(r.info || itemInfo(r.src, r.item));
-    else if (lv.error) App.showInfo({ title: lv.title, chan: "Not Available", desc: `${lv.error}. OK tries again.` });
-    else if (lv.loading) App.showInfo({ title: lv.title, desc: "Loading..." });
-    else if (lv.item) App.showInfo(itemInfo(lv.src, lv.item));
-    else App.showInfo({ title: "On Demand", desc: "" });
+    let info;
+    if (r) info = r.info || itemInfo(r.src, r.item);
+    else if (lv.error) info = { title: lv.title, chan: "Not Available", desc: `${lv.error}. OK tries again.` };
+    else if (lv.loading) info = { title: lv.root ? "On Demand" : lv.title, desc: "Loading..." };
+    else if (lv.item) info = itemInfo(lv.src, lv.item);
+    else info = { title: "On Demand" };
+    App.showInfo(Object.assign({ head }, info));
 
     // footer
     els.hint.textContent = [
-      "▲▼ Select",
-      views ? "◀▶ Order & Genre" : "",
+      wide ? "▲▼ Select" : "▲▼◀▶ Select",
       "OK Choose",
-      OD.stack.length > 1 ? "Back" : "Back Close",
-    ].filter(Boolean).join(" · ");
-    els.pos.textContent = n > ROWS ? `${lv.sel + 1} of ${Math.max(n, lv.total || 0)}` : "";
+      OD.stack.length > 1 ? "Back Previous Menu" : "Back Close",
+    ].join(" · ");
+    els.pos.textContent = nRows > ROWS ? `${lv.sel + 1} of ${Math.max(n, lv.total || 0)}` : "";
   }
 
   // ------------------------------------------------------------- navigation
-  function move(d) {
-    const lv = cur();
-    if (!lv.rows.length) return;
-    lv.sel = U.clamp(lv.sel + d, 0, lv.rows.length - 1);
+  /** Up or down `d` rows of buttons (a button per row in lists, two in menus). */
+  function vert(d) {
+    const lv = cur(), n = lv.rows.length;
+    if (!n) return;
+    const c = cols(lv);
+    const i = U.clamp(lv.sel + d * c, 0, n - 1);
+    if (Math.floor(i / c) === Math.floor(lv.sel / c)) return; // already at the top / bottom row
+    lv.sel = i;
     render();
   }
 
-  /** ◀ ▶ in the title bar: the next order or genre. Loads once the arrows
-   *  are let go of for a moment, so running through them stays quick. */
-  let viewTimer = 0;
-  function changeView(d) {
-    const lv = cur();
-    if (!hasViews(lv)) return;
-    lv.view = (lv.view + d + lv.views.length) % lv.views.length;
-    Store.cfg.vod.views[viewKey(lv)] = lv.views[lv.view].id;
-    Store.save();
-    lv.run++;
-    lv.rows = [];
-    lv.sel = lv.top = 0;
-    lv.loading = true;
+  /** ◀ ▶: across a menu's two columns. In a list of titles ◀ goes back. */
+  function horiz(d) {
+    const lv = cur(), n = lv.rows.length;
+    if (cols(lv) === 1 || !n) {
+      if (d < 0 && OD.stack.length > 1) back();
+      return;
+    }
+    const i = lv.sel + d;
+    if (i < 0 || i >= n || Math.floor(i / 2) !== Math.floor(lv.sel / 2)) return;
+    lv.sel = i;
     render();
-    clearTimeout(viewTimer);
-    viewTimer = setTimeout(() => { if (cur() === lv) load(lv); }, 300);
   }
 
   function levelTitle(it) {
@@ -413,9 +407,15 @@
     }
     const r = lv.rows[lv.sel];
     if (r.act) return r.act();
+    if (r.view) {
+      // an order or genre from a library's menu (remembered for next time)
+      Store.cfg.vod.views[viewKey(lv.src, lv.item)] = r.view.id;
+      Store.save();
+      return push({ title: `${lv.item.title}: ${r.view.label}`, src: lv.src, item: lv.item, view: r.view });
+    }
     if (!r.item) return;
     if (playable(r.item)) return itemDialog(r);
-    push({ title: levelTitle(r.item), src: r.src, item: r.item });
+    push({ title: levelTitle(r.item), src: r.src, item: r.item, pick: r.item.type === "library" });
   }
 
   // ----------------------------------------------------------------- titles
@@ -565,14 +565,14 @@
     const lv = cur();
     if (!lv) return false;
     switch (nav || k) {
-      case "up": move(-1); break;
-      case "down": move(1); break;
-      case "PageUp": case "ChannelUp": move(-ROWS); break;
-      case "PageDown": case "ChannelDown": move(ROWS); break;
-      case "Home": move(-1e9); break;
-      case "End": move(1e9); break;
-      case "left": if (hasViews(lv)) changeView(-1); else if (OD.stack.length > 1) back(); break;
-      case "right": if (hasViews(lv)) changeView(1); break;
+      case "up": vert(-1); break;
+      case "down": vert(1); break;
+      case "PageUp": case "ChannelUp": vert(-ROWS); break;
+      case "PageDown": case "ChannelDown": vert(ROWS); break;
+      case "Home": vert(-1e9); break;
+      case "End": vert(1e9); break;
+      case "left": horiz(-1); break;
+      case "right": horiz(1); break;
       case "ok": case " ": choose(); break;
       case "back": back(); break;
       case "o": case "O": App.closeOnDemand(); break;
@@ -583,8 +583,8 @@
     return true;
   }
 
-  $("v-prev").addEventListener("click", () => changeView(-1));
-  $("v-next").addEventListener("click", () => changeView(1));
+  $("v-up").addEventListener("click", () => vert(-ROWS));
+  $("v-down").addEventListener("click", () => vert(ROWS));
 
   // ------------------------------------------------------------------- api
   window.OnDemand = {
@@ -607,7 +607,7 @@
     },
     render,
     key,
-    wheel: move,
+    wheel: vert,
     /** Add (or replace) a source; On Demand starts again from the top. */
     addSource(src) {
       const list = Store.cfg.vod.sources;

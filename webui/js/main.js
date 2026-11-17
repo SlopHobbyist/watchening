@@ -175,8 +175,14 @@
   }
   App.badgeHtml = (hd, rating) => badges({ hd }, rating ? { rating } : null);
 
-  /** Fill the info panel (top left). Shared with the settings screen. */
-  App.showInfo = function ({ title = "", chan = "", time = "", icons = "", desc = "" }) {
+  /** Fill the info panel (top left). Shared with the settings screen.
+   *  `head` (On Demand): a heading line above the title, the screen's name;
+   *  the description then starts right under the title when there's no time. */
+  App.showInfo = function ({ head = "", title = "", chan = "", time = "", icons = "", desc = "" }) {
+    const info = $("info");
+    info.classList.toggle("head", !!head);
+    info.classList.toggle("notime", !!head && !time && !icons);
+    if (head) $("i-head-t").textContent = head;
     els.chan.textContent = chan;
     fitText(els.chan, chan, true);
     els.title.style.maxWidth = Math.max(120, $("info").offsetWidth - 55 - 11 - els.chan.offsetWidth - 14) + "px";
@@ -388,7 +394,6 @@
     stage.classList.toggle("in-vod", m === "vod");
     document.body.classList.toggle("watching", m === "watch");
     document.body.classList.toggle("in-menu", m === "menu");
-    $("tvl").textContent = m === "vod" ? "On Demand" : "TV Listings";
     if (m !== "watch") { hideBanner(); hidePbar(); Panel.close(); }
     layoutTv();
   }

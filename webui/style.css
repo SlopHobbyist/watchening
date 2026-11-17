@@ -133,7 +133,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 .badge-shadow { fill: #0b0d14; opacity: .9; }
 
 /* --------------------------------------------------------------- timebar */
-#timebar, #v-bar {
+#timebar {
   position: absolute; left: 0; top: 253px; width: var(--W); height: 40px;
   border-top: 4px solid #111230;
   background: linear-gradient(#173f6b, #143d69);
@@ -154,21 +154,21 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #stage.wide #tb-arrow { left: 959px; }
 
 /* ------------------------------------------------------------------ grid */
-#grid, #v-grid { position: absolute; left: 0; top: 293px; width: var(--W); height: 219px; }
-#chans, #v-chans {
+#grid { position: absolute; left: 0; top: 293px; width: var(--W); height: 219px; }
+#chans {
   position: absolute; left: 0; top: 0; width: 156px; height: 219px;
   background: #184359;
 }
-#stripe, #v-stripe {
+#stripe {
   position: absolute; left: 156px; top: 0; width: 8px; height: 219px;
   background: linear-gradient(90deg, #6a7fcf 0, #cfd3ea 1px, #f7f8fb 2px, #f7f8fb 5px, #c6c6c6 5px, #616161 6px, #000 7px, #0a0c22 8px);
 }
-#progs, #v-list {
+#progs {
   position: absolute; left: 164px; top: 0; right: 0; height: 219px;
   background: #969695;
   overflow: hidden;
 }
-#progs::before, #v-list::before { /* gray/dark edge left of the program cells */
+#progs::before { /* gray/dark edge left of the program cells */
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: #4c4c66;
 }
 
@@ -215,7 +215,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 }
 .cell.sel span { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; font-size: 24.5px; letter-spacing: .3px; }
 
-#footer, #v-foot {
+#footer {
   position: absolute; left: 0; top: 512px; width: var(--W); height: 88px;
   background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
   border-top: 1px solid #7f8796;
@@ -288,49 +288,88 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #osd-num.show { display: block; }
 
 /* ------------------------------------------------------- guide extras */
-#empty, #v-empty {
+#empty {
   position: absolute; left: 164px; top: 0; right: 0; height: 219px;
   display: none; align-items: center; justify-content: center; text-align: center;
   padding: 0 40px; background: linear-gradient(#14364c, #18374c);
   font-size: 26px; line-height: 30px; text-shadow: var(--shadow);
 }
-#empty.show, #v-empty.show { display: flex; }
+#empty.show { display: flex; }
 
 /* ------------------------------------------------------------- on demand */
-/* Like the original's list screens ("HDTV by Time", "Digital Music"): the
-   time bar becomes a title bar, its right end a ◀ choice ▶ (here the list's
-   order or a genre), and the listings become one title per row, shorter than
-   the grid's, beside a light column like the channel column (the year, the
-   episode). The bar, column, stripe, cells and footer are the guide's own
-   (grouped with them above). */
-#v-bar > * { position: absolute; }
-#v-icon { left: 56px; top: 4px; width: 34px; height: 26px; filter: drop-shadow(1.5px 1.5px 0 #000); }
-#v-title, #v-view { top: 4px; font-size: 27px; line-height: 28px; text-shadow: var(--shadow); white-space: nowrap; overflow: hidden; }
-#v-title { left: 100px; max-width: calc(var(--W) - 124px); }
-#v-bar.views #v-title { max-width: calc(var(--W) - 418px); }
-#v-bar:not(.views) .v-pick { display: none; }
-#v-sep { left: calc(var(--W) - 304px); }
-#v-prev, #v-next { top: 10px; width: 10px; height: 16px; cursor: pointer; filter: drop-shadow(1.5px 1.5px 0 #000); }
-#v-prev { left: calc(var(--W) - 286px); }
-#v-next { left: calc(var(--W) - 34px); }
-#v-view { left: calc(var(--W) - 268px); width: 226px; text-align: center; }
+/* The original's ON DEMAND Menu: the header, info panel and picture stay;
+   below them, on navy, rounded buttons two to a row (titles get one wide
+   button per row, with their episode or year and how much is left), the
+   selection pale yellow, and "More ▼ Choices" when the list goes on. The
+   info panel's first line names the screen ("ON DEMAND Menu"). */
+#stage.in-vod #tvl { display: none; }
+#stage.in-vod #clock { top: 52px; }
 
-.v-num {
-  position: absolute; left: 0; width: 156px; height: 41px; cursor: pointer;
-  background: linear-gradient(#5f7bd0, #5d78cd 60%, #5672c3);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(0,0,0,.18);
-  color: var(--chan-text); -webkit-text-stroke: 0;
-  font-size: 22px; line-height: 42px; text-align: center; white-space: nowrap;
+#info > #i-head { display: none; left: 0; right: 0; top: 3px; text-align: center; font-size: 26px; }
+#info.head > #i-head { display: block; }
+.on-logo {
+  display: inline-block; margin-right: 9px; font-size: 25px; letter-spacing: -.5px;
+  color: #fff; -webkit-text-stroke: 1.6px #fff;
 }
-.v-num span { display: inline-block; }
-#v-list .cell { left: 0; right: 0; height: 41px; }
-#v-list .cell.blank { cursor: default; }
-.v-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; font-size: 26.5px; line-height: 30px; text-shadow: var(--shadow); }
-.v-tag { flex: none; margin: 0 6px 0 12px; font-size: 21px; color: #a9bcd8; white-space: nowrap; text-shadow: var(--shadow); }
-.cell.sel .v-t { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; font-size: 24.5px; letter-spacing: .3px; }
-.cell.sel .v-tag { color: #46523a; text-shadow: none; -webkit-text-stroke: 0; }
+#info.head { background: linear-gradient(#1b3a70, #24478a 35%, #2a5193 100%); }
+#info.head > #i-title, #info.head > #i-chan { top: 31px; }
+#info.head > #i-time, #info.head > #i-icons { top: 59px; }
+#info.head > #i-desc { top: 87px; height: 53px; }
+#info.head.notime > #i-desc { top: 59px; height: 81px; }
 
-#v-hint, #v-pos { position: absolute; top: 30px; font-size: 21px; line-height: 26px; white-space: nowrap; text-shadow: var(--shadow); color: #c3cde0; }
+#v-menu {
+  position: absolute; left: 0; top: 253px; width: var(--W); height: 311px;
+  border-top: 4px solid #111230;
+  background: linear-gradient(#173470, #1d3e7d 10%, #1f4282 75%, #1b3b78);
+}
+#v-btns { position: absolute; inset: 0; }
+.v-btn {
+  position: absolute; height: 42px; border-radius: 21px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 22px;
+  border: 2px solid #a7bbe0;
+  background: linear-gradient(#3159a0, #254b8e 45%, #1d3f80);
+  box-shadow: 0 0 0 1px #0b1b42, inset 0 1px 0 rgba(255,255,255,.22), 2px 2px 3px rgba(0,0,0,.4);
+  color: #fff; text-shadow: var(--shadow);
+}
+.v-btn.c0, .v-btn.c1 { width: calc((var(--W) - 128px) / 2); }
+.v-btn.c0 { left: 60px; }
+.v-btn.c1 { left: calc(var(--W) / 2 + 4px); }
+.v-btn.wide { left: 60px; right: 60px; justify-content: flex-start; }
+.v-t { min-width: 0; white-space: nowrap; overflow: hidden; font-size: 25px; line-height: 30px; }
+.v-btn.wide .v-t { flex: 1; }
+.v-left { flex: none; min-width: 82px; white-space: nowrap; overflow: hidden; font-size: 21px; color: #b9c9e6; }
+.v-tag { flex: none; white-space: nowrap; font-size: 21px; color: #b9c9e6; }
+.v-btn.warn .v-t { color: #ffc3ad; }
+.v-btn.sel {
+  border-color: #fffde4;
+  background: linear-gradient(#fdfbcc, #f4f1a6 45%, #e7e386);
+  box-shadow: 0 0 0 1px #0b1b42, inset 0 1px 0 rgba(255,255,255,.6), 2px 2px 3px rgba(0,0,0,.4);
+}
+.v-btn.sel, .v-btn.sel .v-t, .v-btn.sel .v-left, .v-btn.sel .v-tag { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
+.v-btn.sel .v-left, .v-btn.sel .v-tag { color: #4d5236; }
+
+#v-more {
+  position: absolute; left: 0; right: 0; top: 274px; height: 28px;
+  display: none; align-items: center; justify-content: center; gap: 12px;
+  font-size: 24px; line-height: 28px; text-shadow: var(--shadow); white-space: nowrap;
+}
+#v-more.up, #v-more.down { display: flex; }
+#v-more svg { width: 22px; height: 13px; fill: #fff; cursor: pointer; filter: drop-shadow(1.5px 1.5px 0 #000); }
+#v-more:not(.up) #v-up, #v-more:not(.down) #v-down { display: none; }
+
+#v-empty {
+  position: absolute; left: 60px; right: 60px; top: 0; height: 270px;
+  display: none; align-items: center; justify-content: center; text-align: center;
+  font-size: 26px; line-height: 30px; text-shadow: var(--shadow);
+}
+#v-empty.show { display: flex; }
+
+#v-foot {
+  position: absolute; left: 0; top: 564px; width: var(--W); height: 36px;
+  background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
+  border-top: 1px solid #7f8796;
+}
+#v-hint, #v-pos { position: absolute; top: 5px; font-size: 21px; line-height: 26px; white-space: nowrap; text-shadow: var(--shadow); color: #c3cde0; }
 #v-hint { left: 56px; }
 #v-pos { right: 24px; }
 
