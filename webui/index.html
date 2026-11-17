@@ -74,6 +74,10 @@
     </div>
 
     <div id="footer"></div>
+
+    <!-- Search (channels): the on-screen keyboard (keyboard.js) in place of the listings -->
+    <div id="g-search"></div>
+    <div id="g-foot"><div id="g-hint"></div></div>
   </div>
 
   <!-- ===================== ON DEMAND =====================
@@ -89,15 +93,6 @@
         <svg id="v-up" viewBox="0 0 22 13" aria-label="Previous choices"><path d="M1,12 L11,1 L21,12 Z"/></svg>
         <svg id="v-down" viewBox="0 0 22 13" aria-label="More choices"><path d="M1,1 L11,12 L21,1 Z"/></svg>
         <span>Choices</span>
-      </div>
-      <!-- a library's Search: what's typed, and the on-screen keyboard (keys made in ondemand.js) -->
-      <div id="v-kb">
-        <div id="v-kb-field">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M15,15 L21,21"/></svg>
-          <span id="v-kb-q"></span><span id="v-kb-caret"></span><span id="v-kb-ph">Type a title</span>
-          <span id="v-kb-n"></span>
-        </div>
-        <div id="v-kb-keys"></div>
       </div>
     </div>
     <div id="v-foot"><div id="v-hint"></div><div id="v-pos"></div></div>
@@ -211,6 +206,7 @@
 <script src="js/store.js"></script>
 <script src="js/dialog.js"></script>
 <script src="js/panel.js"></script>
+<script src="js/keyboard.js"></script>
 <script src="js/player.js"></script>
 <script src="js/main.js"></script>
 <script src="js/settings.js"></script>

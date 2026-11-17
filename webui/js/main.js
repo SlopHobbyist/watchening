@@ -20,6 +20,8 @@
  *                   remote Guide / Info / Captions / Settings keys)
  * Keys (menus):    arrows / WASD move · Enter OK · Esc / Backspace back
  *                  guide: Shift+Left/Right -/+ 1 day · PgUp/PgDn page · 0-9 channel · O On Demand
+ *                  (its first rows are On Demand and Search; Down past the last channel
+ *                   jumps back to them)
  * Anywhere:        F1 settings
  * Mouse:           click a listing to select it, click again to tune · wheel scrolls
  *                  click the picture to watch; while watching, move the mouse
@@ -39,7 +41,7 @@
   const DAY = 24 * 60 * MIN;
   const DAYS_BACK = 1, DAYS_AHEAD = 8;
 
-  const stage = $("stage"), tv = $("tv");
+  const stage = $("stage"), tv = $("tv"), guideEl = $("guide");
   /** Stage width: 800, or 1067 in 16:9 mode (set by the .wide class, see style.css). */
   const stageW = () => stage.offsetWidth;
   /** Whole half-hour columns on screen (3, or 4 in 16:9 mode): the navigable span. */
@@ -101,8 +103,11 @@
   // -------------------------------------------------------------------- state
   const N = () => App.channels.length;
   const S = {
-    sel: 0,          // selected channel index (into App.channels)
-    top: 0,          // channel index in the first visible row
+    sel: 0,          // selected channel index (into App.channels); on a shortcut, the last one
+    pos: 0,          // selected guide row (see "rows")
+    top: 0,          // guide row in the first visible row
+    find: null,      // Search (channels): { s: keyboard session, hits, list, typing }
+    backTo: null,    // a shortcut row to come back to (On Demand's)
     ws: U.floorSlot(Date.now()), // window start
     focus: Date.now(),           // time the cursor sits on
     tunedKey: null,
@@ -110,7 +115,45 @@
     entry: "", entryTimer: 0,
   };
   const nowSlot = () => U.floorSlot(Date.now());
-  const rowOf = (idx) => (idx - S.top + N()) % N();
+
+  // --------------------------------------------------------------------- rows
+  /*
+   * The guide's rows: shortcuts that look like channels at the top (On
+   * Demand, Search), then the channels; after a search, its row and just the
+   * channels that matched. S.pos is the selected row and S.top the first on
+   * screen. The list doesn't wrap around on screen: Down past the last
+   * channel jumps back to the top, Up from the top to the last channel.
+   */
+  const shortcuts = () => (S.find && S.find.list ? ["found"] : ["ondemand", "search"]);
+  /** Channel indexes a search narrowed the guide to, or null: all of them. */
+  const shown = () => (S.find && S.find.list) || null;
+  const nRows = () => (N() ? shortcuts().length + (shown() || App.channels).length : 0);
+  /** A row: { special } or { idx } (a channel). */
+  function rowAt(p) {
+    const sc = shortcuts();
+    if (p < sc.length) return { special: sc[p] };
+    const l = shown();
+    return { idx: l ? l[p - sc.length] : p - sc.length };
+  }
+  function posOf(idx) {
+    const l = shown();
+    const i = l ? l.indexOf(idx) : idx;
+    return i < 0 ? -1 : shortcuts().length + i;
+  }
+  const onChannel = () => rowAt(S.pos).idx != null;
+  /** Scroll as little as needed to show the selected row. */
+  function reveal() {
+    if (S.pos < S.top) S.top = S.pos;
+    if (S.pos >= S.top + ROWS) S.top = S.pos - ROWS + 1;
+    S.top = U.clamp(S.top, 0, Math.max(0, nRows() - ROWS));
+  }
+  /** Put a channel in the top row (or as near as the end of the list lets it). */
+  function toTop(idx) {
+    S.sel = idx;
+    S.pos = Math.max(0, posOf(idx));
+    S.top = S.pos;
+    reveal();
+  }
   const tunedIdx = () => App.channels.findIndex((c) => c.key === S.tunedKey);
   const tunedCh = () => App.all.find((c) => c.key === S.tunedKey) || null;
   /** What's on the picture: an On Demand title, else the tuned channel. */
@@ -229,26 +272,97 @@
     const num = document.createElement("div");
     num.className = "num";
     num.textContent = showEntry ? S.entry + "_" : ch.n;
+    if (!ch.logo) c.classList.add("nologo");
+    c.append(num, callEl(ch.call, ch.logo ? 94 : 142));
+    c.addEventListener("click", () => select(idx, S.focus));
+    return c;
+  }
+  /** A channel's name, squeezed (or stretched) to the column's width. */
+  function callEl(text, avail) {
     const call = document.createElement("div");
     call.className = "call";
-    if (!ch.logo) c.classList.add("nologo");
-    const AVAIL = ch.logo ? 94 : 142, MIN_SX = 0.72;
-    let text = ch.call, w = U.textW(text, 20);
-    let sx = Math.min(1.4, AVAIL / Math.max(1, w));
+    const MIN_SX = 0.72;
+    let sx = Math.min(1.4, avail / Math.max(1, U.textW(text, 20)));
     if (sx < MIN_SX) {
-      while (text.length > 2 && U.textW(text + "...", 20) * MIN_SX > AVAIL) text = text.slice(0, -1);
+      while (text.length > 2 && U.textW(text + "...", 20) * MIN_SX > avail) text = text.slice(0, -1);
       text = text.trimEnd() + "...";
       sx = MIN_SX;
     }
     call.textContent = text;
     call.style.transform = `scaleX(${sx.toFixed(3)})`;
-    c.append(num, call);
-    c.addEventListener("click", () => select(idx, S.focus));
-    return c;
+    return call;
+  }
+
+  // ---------------------------------------------------------------- shortcuts
+  /* On Demand and Search, at the top of the guide, drawn like channels: an
+     icon where the logo goes, a name, and one listing across. */
+  const ICONS = {
+    ondemand: '<svg class="icon" viewBox="0 0 44 40" aria-hidden="true"><rect x="4" y="5" width="36" height="25" rx="4" fill="#fff"/>' +
+      '<path d="M18.5,11 L29,17.5 L18.5,24 Z" fill="#26498b"/><rect x="15" y="33" width="14" height="3.4" rx="1.7" fill="#fff"/></svg>',
+    search: '<svg class="icon" viewBox="0 0 44 40" aria-hidden="true"><circle cx="19" cy="17" r="10" fill="none" stroke="#fff" stroke-width="4.6"/>' +
+      '<path d="M26.5,24.5 L34.5,32.5" stroke="#fff" stroke-width="5.6" stroke-linecap="round"/></svg>',
+  };
+  const chans = (n) => (n === 1 ? "1 Channel" : `${n || "No"} Channels`);
+  function shortcut(kind) {
+    const f = S.find;
+    switch (kind) {
+      case "ondemand": {
+        const has = OnDemand.hasSources();
+        return {
+          icon: ICONS.ondemand, num: "ON", call: "DEMAND",
+          text: has ? "Movies and TV Shows" : "Set Up On Demand",
+          info: has
+            ? { title: "On Demand", chan: "ON DEMAND", desc: "Movies and TV shows from your media server, to watch whenever you like. Press OK." }
+            : { title: "On Demand", chan: "ON DEMAND", desc: "Watch the movies and shows on your Plex Media Server. Press OK to set it up." },
+        };
+      }
+      case "search":
+        return {
+          icon: ICONS.search, call: "SEARCH", text: "Search Channels",
+          info: { title: "Search Channels", desc: "Find a channel by typing part of its name, or its number. Press OK." },
+        };
+      case "found": {
+        const q = f.s.q.trim(), n = f.list.length;
+        return {
+          icon: ICONS.search, call: "SEARCH", text: `"${q}": ${chans(n)}`,
+          info: { title: `"${q}"`, chan: chans(n), desc: "Only the channels that match are showing. OK or Back changes the search; Back from there shows every channel." },
+        };
+      }
+    }
+  }
+  /** A shortcut's row: the channel-like cell and its listing. */
+  function shortcutRow(sc, pos, row, isSel, chanFrag, progFrag, toFit, W) {
+    const c = document.createElement("div");
+    c.className = "chan special";
+    c.style.top = ROW_TOP[row] + "px";
+    c.insertAdjacentHTML("beforeend", sc.icon);
+    if (sc.num) {
+      const num = document.createElement("div");
+      num.className = "num on";
+      num.textContent = sc.num;
+      c.appendChild(num);
+    }
+    c.appendChild(callEl(sc.call, 94));
+    const cell = document.createElement("div");
+    cell.className = "cell special" + (isSel ? " sel" : "");
+    cell.style.left = "0px";
+    cell.style.width = W - PROGS_X + "px";
+    cell.style.top = ROW_TOP[row] + "px";
+    const span = document.createElement("span");
+    cell.appendChild(span);
+    toFit.push([span, sc.text]);
+    const click = () => (S.pos === pos ? enter() : go(pos));
+    c.addEventListener("click", click);
+    cell.addEventListener("click", click);
+    chanFrag.appendChild(c);
+    progFrag.appendChild(cell);
   }
 
   function renderGrid() {
     if (App.mode !== "guide") return;
+    if (S.find && S.find.typing) return renderFind();
+    guideEl.classList.remove("searching");
+    Keyboard.hide();
     const ws = S.ws;
     els.day.textContent = U.dayLabel(ws);
     els.t.forEach((el, k) => (el.textContent = U.fmtSlot(ws + k * SLOT)));
@@ -272,13 +386,19 @@
 
     const W = stageW();
     const visEnd = ws + ((W - PROGS_X) / SLOT_PX) * SLOT;
-    const sel = programAt(App.channels[S.sel], S.focus);
+    const selRow = rowAt(S.pos);
+    const sel = selRow.idx != null ? programAt(App.channels[selRow.idx], S.focus) : null;
     const chanFrag = document.createDocumentFragment();
     const progFrag = document.createDocumentFragment();
     const cellsToFit = [];
 
-    for (let row = 0; row < Math.min(ROWS, N()); row++) {
-      const idx = (S.top + row) % N();
+    for (let row = 0; row < Math.min(ROWS, nRows() - S.top); row++) {
+      const pos = S.top + row, r = rowAt(pos);
+      if (r.special) {
+        shortcutRow(shortcut(r.special), pos, row, pos === S.pos, chanFrag, progFrag, cellsToFit, W);
+        continue;
+      }
+      const idx = r.idx;
       const ch = App.channels[idx];
       chanFrag.appendChild(chanCell(ch, idx, row, S.entry && idx === S.sel));
 
@@ -287,7 +407,7 @@
         const x1 = ((Math.min(p.end, horizon) - ws) / SLOT) * SLOT_PX - GAP;
         const w = Math.min(x1, W) - x0;
         if (w <= 0) continue;
-        const isSel = idx === S.sel && same(p, sel);
+        const isSel = pos === S.pos && same(p, sel);
         const cell = document.createElement("div");
         cell.className = "cell" + (p.cat ? " " + p.cat : "") + (isSel ? " sel" : "");
         cell.style.left = x0 + "px";
@@ -300,8 +420,8 @@
           cellsToFit.push([span, p.year && p.cat === "movie" ? `${p.title} (${p.year})` : p.title]);
         }
         cell.addEventListener("click", () => {
-          if (idx === S.sel && same(programAt(App.channels[idx], S.focus), p)) enter();
-          else select(idx, Math.max(p.start, S.ws));
+          if (pos === S.pos && same(programAt(App.channels[idx], S.focus), p)) enter();
+          else go(pos, Math.max(p.start, S.ws));
         });
         progFrag.appendChild(cell);
       }
@@ -310,7 +430,8 @@
     els.progs.replaceChildren(progFrag);
     for (const [span, text] of cellsToFit) fitText(span, text, false);
 
-    renderInfo(App.channels[S.sel], sel);
+    if (selRow.special) App.showInfo(shortcut(selRow.special).info);
+    else renderInfo(App.channels[S.sel], sel);
   }
 
   function renderClock() {
@@ -324,31 +445,109 @@
   function clampWs() {
     S.ws = Math.max(nowSlot(), Math.min(S.ws, horizon - (cols() + 1) * SLOT));
   }
-  function select(idx, focus) {
-    S.sel = idx;
-    S.focus = focus;
-    if (N() <= ROWS) S.top = 0;
-    else if (rowOf(idx) >= ROWS) S.top = idx;
+  /** Select a row (and the time the cursor sits on, if given). */
+  function go(pos, focus) {
+    S.pos = U.clamp(pos, 0, Math.max(0, nRows() - 1));
+    const r = rowAt(S.pos);
+    if (r.idx != null) S.sel = r.idx;
+    if (focus != null) S.focus = focus;
+    reveal();
     renderGrid();
   }
-  function moveVert(d) {
-    const n = N();
+  const select = (idx, focus) => go(posOf(idx), focus);
+  /** Up / down a row. Past the end it jumps to the other end (`wrap`; not for the mouse wheel). */
+  function moveVert(d, wrap = true) {
+    const n = nRows();
     if (!n) return;
-    S.sel = (S.sel + d + n) % n;
-    if (n <= ROWS) S.top = 0;
-    else if (rowOf(S.sel) >= ROWS) S.top = d < 0 ? S.sel : (S.sel - ROWS + 1 + n) % n;
-    renderGrid();
+    let p = S.pos + d;
+    if (p >= n) p = wrap ? 0 : n - 1;
+    else if (p < 0) p = wrap ? n - 1 : 0;
+    go(p);
   }
   function page(d) {
-    const n = N();
+    const n = nRows();
     if (!n) return;
-    S.sel = (((S.sel + d * ROWS) % n) + n) % n;
-    S.top = n <= ROWS ? 0 : (((S.top + d * ROWS) % n) + n) % n;
-    if (n > ROWS && rowOf(S.sel) >= ROWS) S.top = S.sel;
+    if (d > 0 && S.pos === n - 1) return go(0);   // at the end: back to the top
+    if (d < 0 && S.pos === 0) return go(n - 1);
+    S.top = U.clamp(S.top + d * ROWS, 0, Math.max(0, n - ROWS));
+    go(S.pos + d * ROWS);
+  }
+
+  // --------------------------------------------------------- search channels
+  /*
+   * The Search shortcut: the on-screen keyboard (keyboard.js) in place of
+   * the listings. Matching is done here, so what matches shows in the info
+   * panel at once, as you type: channels whose number is what's typed, then
+   * those with a word starting with it, then numbers starting with it, then
+   * names with it anywhere. Search then shows the guide with only those
+   * channels (under a row saying what was searched); OK on that row or Back
+   * returns to the keyboard, and Back from the keyboard to every channel.
+   */
+  const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+  function findChannels(q) {
+    const f = fold(q);
+    if (!f) return [];
+    const tiers = [[], [], [], []];
+    const digits = /^\d+$/.test(f);
+    App.channels.forEach((c, i) => {
+      const src = `${c.name} ${c.call}`;
+      if (c.fold == null || c.foldSrc !== src) { c.fold = " " + fold(src) + " "; c.foldSrc = src; }
+      const n = String(c.n);
+      if (digits && n === f) tiers[0].push(i);
+      else if (c.fold.includes(" " + f)) tiers[1].push(i);
+      else if (digits && n.startsWith(f)) tiers[2].push(i);
+      else if (f.length > 1 && c.fold.includes(f)) tiers[3].push(i);
+    });
+    return tiers.flat();
+  }
+  function openFind() {
+    if (!S.find) {
+      const f = (S.find = { hits: [], list: null, typing: false });
+      f.s = Keyboard.session({
+        placeholder: "Type a channel name or number",
+        onInput: (q) => { f.hits = findChannels(q); findShow(); },
+        onGo: showFound,
+        onBack: closeFind,
+      });
+    }
+    S.find.typing = true;
     renderGrid();
   }
+  /** Back from the keyboard: every channel again, on the Search row. */
+  function closeFind() {
+    S.find = null;
+    go(shortcuts().indexOf("search"));
+  }
+  /** Search: the guide, showing only the channels that match. */
+  function showFound() {
+    const f = S.find;
+    if (!f.hits.length) return;
+    f.list = f.hits.slice();
+    f.typing = false;
+    S.top = 0;
+    go(shortcuts().length);
+  }
+  function renderFind() {
+    guideEl.classList.add("searching");
+    Keyboard.show($("g-search"), S.find.s);
+    $("g-hint").textContent = Keyboard.hint;
+    findShow();
+  }
+  /** What's typed matches: the count in the field, the channels in the info panel. */
+  function findShow() {
+    const f = S.find, q = f.s.q.trim(), n = f.hits.length;
+    Keyboard.status(q ? chans(n) : "", { canGo: n > 0 });
+    App.showInfo(!q
+      ? { title: "Search Channels", desc: "Type part of a channel's name, or its number, here or on a keyboard. What matches shows here as you type; Search shows it in the guide." }
+      : {
+        title: `"${q}"`, chan: chans(n),
+        desc: n ? f.hits.slice(0, 24).map((i) => `${App.channels[i].n} ${App.channels[i].call}`).join(", ") : "No channel matches.",
+      });
+  }
+
   function moveRight() {
-    if (!N()) return;
+    if (!N() || !onChannel()) return;
     const ch = App.channels[S.sel];
     const p = programAt(ch, S.focus);
     if (p.end >= horizon) return;
@@ -359,7 +558,7 @@
     renderGrid();
   }
   function moveLeft() {
-    if (!N()) return;
+    if (!N() || !onChannel()) return;
     const ch = App.channels[S.sel];
     const p = programAt(ch, S.focus);
     const ns = nowSlot();
@@ -395,16 +594,23 @@
     document.body.classList.toggle("watching", m === "watch");
     document.body.classList.toggle("in-menu", m === "menu");
     if (m !== "watch") { hideBanner(); hidePbar(); Panel.close(); }
+    else S.backTo = null;
     layoutTv();
   }
+  /** The guide: on the channel playing, at the top; or back on the shortcut
+   *  it was left from (On Demand). A search is over. */
   App.openGuide = function () {
     setMode("guide");
     S.ws = nowSlot();
     S.focus = Date.now();
-    const ti = tunedIdx();
-    if (ti >= 0) { S.sel = ti; S.top = ti; }
-    if (S.sel >= N()) S.sel = 0;
-    if (N() <= ROWS) S.top = 0;
+    S.find = null;
+    if (N()) {
+      const ti = tunedIdx();
+      toTop(ti >= 0 ? ti : U.clamp(S.sel, 0, N() - 1));
+      const back = S.backTo ? shortcuts().indexOf(S.backTo) : -1;
+      if (back >= 0) { S.pos = back; reveal(); }
+    }
+    S.backTo = null;
     renderGrid();
   };
   App.watch = function () {
@@ -479,6 +685,9 @@
 
   function enter() {
     if (!N()) return OnDemand.hasSources() ? App.openOnDemand() : App.openMenu();
+    const r = rowAt(S.pos);
+    if (r.special === "ondemand") { App.openOnDemand(); S.backTo = "ondemand"; return; }
+    if (r.special) return openFind();
     const ch = App.channels[S.sel];
     if (S.vod || ch.key !== S.tunedKey) tune(S.sel); // (tuning stops an On Demand title)
     App.watch();
@@ -528,7 +737,7 @@
     let idx = App.channels.findIndex((c) => c.n >= n);
     if (idx < 0) idx = N() - 1;
     if (App.mode === "watch") { tune(idx); announce(); }
-    else { S.sel = idx; S.top = N() <= ROWS ? 0 : idx; renderGrid(); }
+    else { S.find = null; toTop(idx); renderGrid(); }
   }
 
   // --------------------------------------------------------------- tuning
@@ -1077,7 +1286,10 @@
       case "left": e.shiftKey ? shiftDay(-1) : moveLeft(); return true;
       case "right": e.shiftKey ? shiftDay(1) : moveRight(); return true;
       case "ok": enter(); return true;
-      case "back": if (N() || S.vod) App.watch(); return true;
+      case "back":
+        if (shown()) openFind(); // a search's channels: back to the keyboard
+        else if (N() || S.vod) App.watch();
+        return true;
     }
     switch (k) {
       case "PageUp": case "ChannelUp": page(-1); break;
@@ -1106,6 +1318,7 @@
     }
     if (App.mode === "menu") { if (Settings.key(e)) e.preventDefault(); return; }
     if (App.mode === "vod") { if (OnDemand.key(e)) e.preventDefault(); return; }
+    if (App.mode === "guide" && S.find && S.find.typing) { if (Keyboard.key(e)) e.preventDefault(); return; }
     if (App.mode === "watch" && Panel.key(e)) { e.preventDefault(); return; }
     if (/^[0-9]$/.test(k)) { digit(k); e.preventDefault(); return; }
     let handled = true;
@@ -1158,7 +1371,8 @@
     if (App.mode === "menu") Settings.wheel(d);
     else if (App.mode === "vod") OnDemand.wheel(d);
     else if (App.mode === "watch") Panel.isOpen() ? Panel.move(d) : surf(d);
-    else moveVert(d);
+    else if (S.find && S.find.typing) Keyboard.move(d);
+    else moveVert(d, false);
   }, { passive: true });
 
   // the picture: from the guide (or On Demand) it starts watching; while watching it toggles the bar
@@ -1282,8 +1496,15 @@
       else { S.tunedKey = null; Player.stop(); }
     }
     if (S.sel >= N()) S.sel = Math.max(0, N() - 1);
-    if (N() <= ROWS) S.top = 0;
-    else if (S.top >= N()) S.top = S.sel;
+    // a search: match again (channel indexes have changed)
+    if (S.find) {
+      S.find.hits = findChannels(S.find.s.q);
+      if (S.find.list) S.find.list = S.find.hits.length ? S.find.hits.slice() : null;
+    }
+    // stay on the same channel (or shortcut)
+    if (S.pos >= shortcuts().length) S.pos = posOf(S.sel) < 0 ? shortcuts().length : posOf(S.sel);
+    S.pos = U.clamp(S.pos, 0, Math.max(0, nRows() - 1));
+    reveal();
     refreshViews();
   };
 

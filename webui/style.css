@@ -296,6 +296,34 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 }
 #empty.show { display: flex; }
 
+/* Shortcuts at the top of the guide that look like channels: On Demand and
+   Search. Their listing is one cell across, in On Demand's navy. */
+.chan.special { padding-left: 54px; }
+.chan .icon {
+  position: absolute; left: 5px; top: 6px; width: 44px; height: 40px;
+  filter: drop-shadow(1px 1px 1px rgba(0,0,0,.45));
+}
+.chan .on { color: #fff; -webkit-text-stroke: 1.2px #fff; text-shadow: var(--shadow); letter-spacing: -.5px; }
+.cell.special { background: linear-gradient(#24478a, #1f4282 50%, #1b3b78); box-shadow: inset 0 1px 0 rgba(167,187,224,.35); }
+.cell.special.sel { background: #d2e6a8; box-shadow: inset 0 1px 0 rgba(255,255,255,.45); }
+
+/* Search (channels): the keyboard in place of the time bar, listings and
+   footer, on On Demand's navy panel */
+#g-search, #g-foot { display: none; }
+#guide.searching #timebar, #guide.searching #grid, #guide.searching #footer { display: none; }
+#guide.searching #g-search, #guide.searching #g-foot { display: block; }
+#g-search {
+  position: absolute; left: 0; top: 253px; width: var(--W); height: 311px;
+  border-top: 4px solid #111230;
+  background: linear-gradient(#173470, #1d3e7d 10%, #1f4282 75%, #1b3b78);
+}
+#g-foot {
+  position: absolute; left: 0; top: 564px; width: var(--W); height: 36px;
+  background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
+  border-top: 1px solid #7f8796;
+}
+#g-hint { position: absolute; left: 56px; top: 5px; font-size: 21px; line-height: 26px; white-space: nowrap; text-shadow: var(--shadow); color: #c3cde0; }
+
 /* ------------------------------------------------------------- on demand */
 /* The original's ON DEMAND Menu: the header, info panel and picture stay;
    below them, on navy, rounded buttons two to a row (titles get one wide
@@ -364,43 +392,8 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 }
 #v-empty.show { display: flex; }
 
-/* A library's Search: the field and an on-screen keyboard in place of the
-   buttons, in the same rounded style. A straight grid (11 columns: ten keys
-   and the Delete / Clear / Search column), so ▲▼ land right above or below.
-   No transitions anywhere: the highlight jumps, as the box's did. */
-#v-kb { position: absolute; inset: 0; display: none; }
-#vod.kb #v-kb { display: block; }
+/* On Demand's Search: the on-screen keyboard (below) in place of the buttons */
 #vod.kb #v-btns, #vod.kb #v-more, #vod.kb #v-empty { display: none; }
-#v-kb-field {
-  position: absolute; left: 60px; right: 60px; top: 20px; height: 42px; border-radius: 21px;
-  display: flex; align-items: center; padding: 0 22px 0 16px;
-  border: 2px solid #a7bbe0; background: #102a62;
-  box-shadow: 0 0 0 1px #0b1b42, inset 0 2px 4px rgba(0,0,0,.45);
-}
-#v-kb-field svg { flex: none; width: 22px; height: 22px; margin-right: 10px; fill: none; stroke: #b9c9e6; stroke-width: 2.6; stroke-linecap: round; }
-#v-kb-q { min-width: 0; overflow: hidden; white-space: pre; font-size: 25px; line-height: 30px; color: #fff; text-shadow: var(--shadow); }
-#v-kb-caret { flex: none; width: 2px; height: 26px; margin-left: 1px; background: var(--lime); animation: v-blink 1.06s step-end infinite; }
-@keyframes v-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
-#v-kb-ph { flex: none; margin-left: 4px; white-space: nowrap; font-size: 25px; line-height: 30px; color: #7f93bb; -webkit-text-stroke: 0; }
-#v-kb-field:not(.empty) #v-kb-ph { display: none; }
-#v-kb-n { flex: none; margin-left: auto; padding-left: 16px; white-space: nowrap; font-size: 21px; color: #b9c9e6; text-shadow: var(--shadow); }
-#v-kb-n.pending { opacity: .55; }
-
-#v-kb-keys {
-  position: absolute; left: 60px; right: 60px; top: 76px;
-  display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)) 132px; grid-auto-rows: 44px; gap: 7px 6px;
-}
-.v-key {
-  min-width: 0; border-radius: 10px; cursor: pointer; overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  border: 2px solid #a7bbe0; background: #26498b;
-  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
-  color: #fff; text-shadow: var(--shadow); white-space: nowrap; font-size: 25px; line-height: 30px;
-}
-.v-key.act { background: #1d3c78; font-size: 22px; }
-.v-key.off { color: #8094bd; }
-.v-key.sel { border-color: #fffde4; background: #f3f0a2; color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
-.v-key.sel.off { color: #6b6f52; }
 
 #v-foot {
   position: absolute; left: 0; top: 564px; width: var(--W); height: 36px;
@@ -410,6 +403,44 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #v-hint, #v-pos { position: absolute; top: 5px; font-size: 21px; line-height: 26px; white-space: nowrap; text-shadow: var(--shadow); color: #c3cde0; }
 #v-hint { left: 56px; }
 #v-pos { right: 24px; }
+
+/* ------------------------------------------------------- on-screen keyboard */
+/* keyboard.js: the field and the keys, in the On Demand buttons' rounded
+   style, filling the navy panel below the info panel (#v-menu, #g-search).
+   A straight grid (11 columns: ten keys and the Delete / Clear / Search
+   column), so ▲▼ land right above or below. No transitions anywhere: the
+   highlight jumps, as the box's did. */
+#kb { position: absolute; inset: 0; }
+#kb-field {
+  position: absolute; left: 60px; right: 60px; top: 20px; height: 42px; border-radius: 21px;
+  display: flex; align-items: center; padding: 0 22px 0 16px;
+  border: 2px solid #a7bbe0; background: #102a62;
+  box-shadow: 0 0 0 1px #0b1b42, inset 0 2px 4px rgba(0,0,0,.45);
+}
+#kb-field svg { flex: none; width: 22px; height: 22px; margin-right: 10px; fill: none; stroke: #b9c9e6; stroke-width: 2.6; stroke-linecap: round; }
+#kb-q { min-width: 0; overflow: hidden; white-space: pre; font-size: 25px; line-height: 30px; color: #fff; text-shadow: var(--shadow); }
+#kb-caret { flex: none; width: 2px; height: 26px; margin-left: 1px; background: var(--lime); animation: kb-blink 1.06s step-end infinite; }
+@keyframes kb-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
+#kb-ph { flex: none; margin-left: 4px; white-space: nowrap; font-size: 25px; line-height: 30px; color: #7f93bb; -webkit-text-stroke: 0; }
+#kb-field:not(.empty) #kb-ph { display: none; }
+#kb-n { flex: none; margin-left: auto; padding-left: 16px; white-space: nowrap; font-size: 21px; color: #b9c9e6; text-shadow: var(--shadow); }
+#kb-n.pending { opacity: .55; }
+
+#kb-keys {
+  position: absolute; left: 60px; right: 60px; top: 76px;
+  display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)) 132px; grid-auto-rows: 44px; gap: 7px 6px;
+}
+.kb-key {
+  min-width: 0; border-radius: 10px; cursor: pointer; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #a7bbe0; background: #26498b;
+  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
+  color: #fff; text-shadow: var(--shadow); white-space: nowrap; font-size: 25px; line-height: 30px;
+}
+.kb-key.act { background: #1d3c78; font-size: 22px; }
+.kb-key.off { color: #8094bd; }
+.kb-key.sel { border-color: #fffde4; background: #f3f0a2; color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
+.kb-key.sel.off { color: #6b6f52; }
 
 /* -------------------------------------------------------------- settings */
 /* Full screen: header, title bar, category column beside the rows (like the

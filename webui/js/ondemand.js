@@ -46,8 +46,7 @@
  * Keys: ▲▼◀▶ select (in a list of titles ◀ goes back) · OK open or play ·
  *       Back up a level, and from the top to the guide · PgUp/PgDn page ·
  *       O closes (back to wherever On Demand was opened from)
- * Search: ▲▼◀▶ OK the on-screen keys, or type on a keyboard (Enter then
- *       searches, Backspace deletes, Delete clears) · Back leaves
+ * Search: the on-screen keyboard (keyboard.js) · Back leaves
  */
 (function () {
   "use strict";
@@ -370,7 +369,7 @@
   // ----------------------------------------------------------------- render
   const els = {
     vod: $("vod"), btns: $("v-btns"), empty: $("v-empty"), more: $("v-more"), hint: $("v-hint"), pos: $("v-pos"),
-    field: $("v-kb-field"), q: $("v-kb-q"), n: $("v-kb-n"), keys: $("v-kb-keys"),
+    menu: $("v-menu"),
   };
 
   function div(cls, text) {
@@ -388,6 +387,7 @@
     const lv = cur();
     els.vod.classList.toggle("kb", !!lv.kb);
     if (lv.kb) return kbRender(lv);
+    Keyboard.hide();
     const n = lv.rows.length, c = cols(lv), wide = c === 1;
     const nRows = Math.ceil(n / c);
     lv.sel = U.clamp(lv.sel, 0, Math.max(0, n - 1));
@@ -450,7 +450,7 @@
   function vert(d) {
     const lv = cur();
     if (!lv) return;
-    if (lv.kb) return kbMove(lv, Math.sign(d), 0);
+    if (lv.kb) return Keyboard.move(d);
     const n = lv.rows.length;
     if (!n) return;
     const c = cols(lv);
@@ -498,127 +498,37 @@
 
   // ----------------------------------------------------------------- search
   /*
-   * A library's Search: the field and an on-screen keyboard in place of the
-   * buttons. QWERTY with the numbers above, laid out like a computer's
-   * keyboard (Delete where Backspace is, Search where Enter is, a wide Space
-   * at the bottom), but on a straight grid so ▲▼ always land on the key
-   * right above or below, and ◀▶ wrap around a row. Going down onto Space
-   * and back up returns to the same column.
-   *
-   * Letters come out capitalized at the start of a word ("The Matrix").
-   * What matches shows in the info panel as you type, a moment after the
-   * last key (each search is kept, so Delete brings an earlier one back at
-   * once); Search lists it all as an ordinary list of titles, and Back from
-   * there returns to the keyboard with the text still in it.
-   *
-   * Speed: the keys are made once and stay; moving only moves the
-   * highlight (two class changes), typing only changes the field's text.
-   * Nothing else is drawn until a search comes back.
+   * A library's Search: the on-screen keyboard (keyboard.js) in place of the
+   * buttons. What matches shows in the info panel as you type, a moment
+   * after the last key (each search is kept, so Delete brings an earlier one
+   * back at once, and each is asked of the server only once); Search lists
+   * it all as an ordinary list of titles, and Back from there returns to the
+   * keyboard with the text still in it.
    */
-  const KB = [
-    [..."1234567890", { act: "del", label: "Delete" }],
-    [..."QWERTYUIOP", { act: "clear", label: "Clear" }],
-    [..."ASDFGHJKL'", { act: "go", label: "Search" }],
-    [..."ZXCVBNM", { act: "space", label: "Space", span: 4 }],
-  ];
-  const KB_COLS = 11, Q_MAX = 40, WAIT = 200;
-  /** keys: [{ el, r, c0, c1, ch | act }] · grid[row][col] -> key index · sel: highlighted key */
-  const kb = { keys: [], grid: [], sel: -1 };
+  const WAIT = 200;
   const norm = (q) => q.trim().replace(/\s+/g, " ").toLowerCase();
   const matches = (n) => (n === 1 ? "1 Match" : `${n || "No"} Matches`);
 
-  function kbBuild() {
-    if (kb.keys.length) return;
-    const frag = document.createDocumentFragment();
-    KB.forEach((row, r) => {
-      kb.grid[r] = [];
-      let c = 0;
-      for (const k of row) {
-        const o = typeof k === "string" ? { ch: k, label: k } : k;
-        const span = o.span || 1;
-        const key = Object.assign({ r, c0: c, c1: c + span - 1 }, o);
-        key.el = div("v-key" + (o.act ? " act" : ""), o.label);
-        if (span > 1) key.el.style.gridColumn = `span ${span}`;
-        const i = kb.keys.push(key) - 1;
-        key.el.addEventListener("click", () => {
-          const lv = cur();
-          if (App.mode !== "vod" || !lv || !lv.kb) return;
-          lv.typed = false;
-          kbSelect(lv, i);
-          kbPress(lv, i, false);
-        });
-        frag.appendChild(key.el);
-        for (let x = c; x < c + span; x++) kb.grid[r][x] = i;
-        c += span;
-      }
-    });
-    els.keys.appendChild(frag);
-  }
-
   function openSearch(lib) {
-    kbBuild();
-    OD.stack.push(level({
+    const lv = level({
       kb: true, title: `${lib.item.title}: Search`, src: lib.src, item: lib.item, loading: false,
-      q: "",                // what's typed
-      ki: kb.grid[1][0], goal: 0, // the highlighted key (on Q to start); the column ▲▼ aim for
-      typed: false,         // the last key was typed on a keyboard (then Enter searches)
       asks: new Map(), got: new Map(), // searches so far: query -> promise, and -> result
       res: null, for: "", err: "", pending: false, timer: 0,   // the search showing, and for what
-    }));
+    });
+    lv.s = Keyboard.session({
+      placeholder: "Type a title",
+      onInput: () => kbSearch(lv),
+      onGo: () => kbGo(lv),
+      onBack: () => { clearTimeout(lv.timer); back(); },
+    });
+    OD.stack.push(lv);
     render();
-  }
-
-  function kbSelect(lv, i) {
-    lv.ki = i;
-    if (kb.sel === i) return;
-    if (kb.sel >= 0) kb.keys[kb.sel].el.classList.remove("sel");
-    kb.keys[i].el.classList.add("sel");
-    kb.sel = i;
-  }
-
-  /** ◀▶ along a row (wrapping), ▲▼ to the key in the same column. */
-  function kbMove(lv, dr, dc) {
-    const k = kb.keys[lv.ki];
-    if (dc) {
-      const i = kb.grid[k.r][(dc > 0 ? k.c1 + 1 : k.c0 - 1 + KB_COLS) % KB_COLS];
-      const t = kb.keys[i];
-      lv.goal = dc > 0 ? t.c0 : t.c1;
-      return kbSelect(lv, i);
-    }
-    const r = k.r + dr;
-    if (r >= 0 && r < KB.length) kbSelect(lv, kb.grid[r][lv.goal]);
-  }
-
-  function kbPress(lv, i, repeat) {
-    const k = kb.keys[i];
-    if (repeat && k.act !== "del") return; // holding OK repeats Delete only
-    switch (k.act) {
-      case "del": return kbEdit(lv, lv.q.slice(0, -1));
-      case "clear": return kbEdit(lv, "");
-      case "space": return kbType(lv, " ");
-      case "go": return kbGo(lv);
-    }
-    const ch = /[A-Z]/.test(k.ch) && !/(^|\s)$/.test(lv.q) ? k.ch.toLowerCase() : k.ch;
-    kbType(lv, ch);
-  }
-
-  function kbType(lv, ch) {
-    if (ch === " " && (!lv.q || lv.q.endsWith(" "))) return;
-    if (lv.q.length >= Q_MAX) return;
-    kbEdit(lv, lv.q + ch);
-  }
-
-  function kbEdit(lv, q) {
-    if (q === lv.q) return;
-    lv.q = q;
-    kbField(lv);
-    kbSearch(lv);
   }
 
   /** Search for what's typed, once typing pauses; one already made shows at once. */
   function kbSearch(lv) {
     clearTimeout(lv.timer);
-    const q = norm(lv.q);
+    const q = norm(lv.s.q);
     if (q === lv.for && lv.res) { lv.pending = false; return kbCount(lv); } // only a space more
     if (!q) {
       Object.assign(lv, { res: null, for: "", err: "", pending: false });
@@ -642,7 +552,7 @@
   async function kbAsk(lv, q) {
     let res = null, err = "";
     try { res = await ask(lv, q); } catch (e) { err = e.message || String(e); }
-    if (norm(lv.q) === q) kbFound(lv, q, res, err); // still what's typed
+    if (norm(lv.s.q) === q) kbFound(lv, q, res, err); // still what's typed
   }
 
   function kbFound(lv, q, res, err) {
@@ -652,29 +562,23 @@
 
   /** Searching opens the matches as a list of titles. */
   function kbGo(lv) {
-    const q = norm(lv.q);
+    const q = norm(lv.s.q);
     if (!q) return;
     if (lv.for === q && lv.res && !lv.res.items.length) return; // nothing to list
     if (lv.pending) { clearTimeout(lv.timer); kbAsk(lv, q); } // no need to wait
-    push({ title: `${lv.item.title}: "${lv.q.trim()}"`, src: lv.src, item: lv.item, query: q, found: ask(lv, q) });
+    push({ title: `${lv.item.title}: "${lv.s.q.trim()}"`, src: lv.src, item: lv.item, query: q, found: ask(lv, q) });
   }
 
-  // drawing: each part separately, so a key press redraws only what it changed
-  function kbField(lv) {
-    els.q.textContent = lv.q;
-    els.field.classList.toggle("empty", !lv.q);
-    if (lv.q.length > 20) els.q.scrollLeft = els.q.scrollWidth; // keep the end in view
-  }
   function kbCount(lv) {
-    const q = norm(lv.q);
+    const q = norm(lv.s.q);
     const n = lv.res ? lv.res.total != null ? lv.res.total : lv.res.items.length : 0;
-    els.n.textContent = !q ? "" : lv.err && !lv.pending ? "Not Available"
-      : lv.res ? matches(n) : "Searching...";
-    els.n.classList.toggle("pending", !!q && lv.pending);
-    kb.keys[kb.grid[2][10]].el.classList.toggle("off", !q || (!lv.pending && lv.for === q && !!lv.res && !n));
+    Keyboard.status(!q ? "" : lv.err && !lv.pending ? "Not Available" : lv.res ? matches(n) : "Searching...", {
+      pending: !!q && lv.pending,
+      canGo: !(!lv.pending && lv.for === q && !!lv.res && !n),
+    });
   }
   function kbInfo(lv) {
-    const lib = lv.item, q = lv.q.trim();
+    const lib = lv.item, q = lv.s.q.trim();
     const title = `"${q}"`, chan = srcLabel(lv.src);
     let info;
     if (!q) {
@@ -700,43 +604,11 @@
     kbInfo(lv);
   }
   function kbRender(lv) {
-    kbSelect(lv, lv.ki);
-    kbField(lv);
+    Keyboard.show(els.menu, lv.s);
     kbCount(lv);
     kbInfo(lv);
-    els.hint.textContent = "▲▼◀▶ Select · OK Type · Back Previous Menu";
+    els.hint.textContent = Keyboard.hint;
     els.pos.textContent = "";
-  }
-
-  /** Keys on the Search screen. A keyboard's own keys type (letters, WASD
-   *  included); arrows and a remote move over the on-screen keys. */
-  function kbKey(e, lv) {
-    const k = e.key;
-    if (k.length === 1 && /[\p{L}\p{N}\p{P}\p{S} ]/u.test(k)) {
-      lv.typed = true;
-      kbType(lv, k);
-      return true;
-    }
-    if (k === "Backspace") {
-      if (lv.q) kbEdit(lv, lv.q.slice(0, -1));
-      else if (!e.repeat) back();
-      return true;
-    }
-    if (k === "Delete" || k === "Clear") { kbEdit(lv, ""); return true; }
-    if (k === "Tab") return true;
-    switch (U.nav(e)) {
-      case "up": lv.typed = false; kbMove(lv, -1, 0); break;
-      case "down": lv.typed = false; kbMove(lv, 1, 0); break;
-      case "left": lv.typed = false; kbMove(lv, 0, -1); break;
-      case "right": lv.typed = false; kbMove(lv, 0, 1); break;
-      case "ok":
-        // typing on a keyboard: Enter searches; on a remote OK presses the key
-        if (lv.typed && k === "Enter") { if (!e.repeat) kbGo(lv); } else kbPress(lv, lv.ki, e.repeat);
-        break;
-      case "back": clearTimeout(lv.timer); back(); break;
-      default: return false;
-    }
-    return true;
   }
 
   // ----------------------------------------------------------------- titles
@@ -923,7 +795,7 @@
     const k = e.key, nav = U.nav(e);
     const lv = cur();
     if (!lv) return false;
-    if (lv.kb) return kbKey(e, lv);
+    if (lv.kb) return Keyboard.key(e);
     switch (nav || k) {
       case "up": vert(-1); break;
       case "down": vert(1); break;
