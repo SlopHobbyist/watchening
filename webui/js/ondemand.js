@@ -42,8 +42,8 @@
  * Unwatched, which play a random episode.
  *
  * Keys: ▲▼◀▶ select (in a list of titles ◀ goes back) · OK open or play ·
- *       Back up a level, and from the top back to wherever On Demand was
- *       opened from · PgUp/PgDn page · O closes
+ *       Back up a level, and from the top to the guide · PgUp/PgDn page ·
+ *       O closes (back to wherever On Demand was opened from)
  */
 (function () {
   "use strict";
@@ -324,7 +324,7 @@
   }
 
   function back() {
-    if (OD.stack.length <= 1) return App.closeOnDemand();
+    if (OD.stack.length <= 1) return App.openGuide();
     OD.stack.pop().run++;
     const lv = cur();
     if (lv.stale) load(lv, true);
@@ -404,7 +404,7 @@
     els.hint.textContent = [
       wide ? "▲▼ Select" : "▲▼◀▶ Select",
       "OK Choose",
-      OD.stack.length > 1 ? "Back Previous Menu" : "Back Close",
+      OD.stack.length > 1 ? "Back Previous Menu" : "Back Guide",
     ].join(" · ");
     els.pos.textContent = nRows > ROWS ? `${lv.sel + 1} of ${Math.max(n, lv.total || 0)}` : "";
   }
