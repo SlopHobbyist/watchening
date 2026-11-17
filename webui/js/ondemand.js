@@ -28,11 +28,18 @@
  *     release(src, play)                       let go of a stream (optional)
  *     setSubtitle(src, play, sub | null)       remember the subtitle pick (optional)
  *     setWatched(src, item, on)
+ *     episodes(src, show | season) -> [item]   every episode, for Shuffle (optional)
+ *     trailer(src, movie)  -> item | null      its trailer, to play (optional)
  *   }
  *   item = { id, type: library | folder | movie | show | season | episode,
  *            title, label (title in mixed lists), year, rating, dur, offset (sec),
  *            watched, desc, hd, stars (0-5), show, season, episode, count,
- *            unwatched, seasons, aired ("2008-01-20"), cat (movie | kids | sports | "") }
+ *            unwatched, seasons, aired ("2008-01-20"), cat (movie | kids | sports | ""),
+ *            lib (the library it's in, in mixed lists), extra ("Trailer") }
+ *
+ * Libraries can be hidden (Settings, On Demand): Store.cfg.vod.hiddenLibs.
+ * A show's seasons and a season's episodes start with Shuffle and Shuffle
+ * Unwatched, which play a random episode.
  *
  * Keys: ▲▼◀▶ select (in a list of titles ◀ goes back) · OK open or play ·
  *       Back up a level, and from the top back to wherever On Demand was
@@ -75,6 +82,8 @@
     return Object.assign({ rows: [], total: 0, sel: 0, top: 0, view: null, pick: false, loading: true, error: "", stale: false, run: 0 }, o);
   }
   const viewKey = (src, it) => `${src.id}:${it.id}`;
+  /** Whether a library (by id) is hidden from On Demand. */
+  const libHidden = (src, id) => id != null && id !== "" && Store.cfg.vod.hiddenLibs.includes(`${src.id}:${id}`);
   /** Titles get one wide button per row; menus two narrow ones. */
   const isWide = (lv) => lv.rows.some((r) => r.item && playable(r.item));
   const cols = (lv) => (isWide(lv) ? 1 : 2);
@@ -177,6 +186,30 @@
   /** A button: { src, item, left, text, tag } or, for things that aren't
    *  titles, { text, info, act } (or { text, view } in a library's menu). */
   const row = (src, it) => ({ src, item: it, left: leftText(src, it), text: it.label || it.title, tag: tagText(it) });
+  /** A list's titles, leaving out those from hidden libraries. */
+  const titleRows = (lv, items) => items.filter((it) => !libHidden(lv.src, it.lib)).map((it) => row(lv.src, it));
+
+  /** Shuffle and Shuffle Unwatched, at the top of a show's seasons or a season's episodes. */
+  function shuffleRows(lv, items) {
+    const it = lv.item, src = lv.src;
+    if (!providers[src.type].episodes || !items.length) return [];
+    if (it.type !== "show" && it.type !== "season") return [];
+    const from = it.type === "season" ? `${it.show ? it.show + ", " : ""}${it.title}`
+      : items.some((x) => x.type === "season") ? `any season of ${it.title}` : it.title;
+    const title = it.show || it.title;
+    return [
+      {
+        text: "Shuffle",
+        info: { title, chan: "Shuffle", desc: `Play a random episode from ${from}.` },
+        act: () => shuffle(src, it, false),
+      },
+      {
+        text: "Shuffle Unwatched",
+        info: { title, chan: "Shuffle Unwatched", desc: `Play a random episode you haven't watched from ${from}.` },
+        act: () => shuffle(src, it, true),
+      },
+    ];
+  }
 
   /** With no sources: the ways to add one. */
   function setupRows() {
@@ -195,9 +228,13 @@
     const several = srcs.length > 1;
     const per = await Promise.all(srcs.map(async (src) => {
       try {
-        const items = await providers[src.type].root(src);
+        const all = await providers[src.type].root(src);
+        const items = all.filter((it) => it.type !== "library" || !libHidden(src, it.id));
         // with more than one server, say whose "Movies" each one is
-        if (items.length) return items.map((it) => Object.assign(row(src, it), several ? { text: `${src.name}: ${it.title}` } : {}));
+        if (items.some((it) => it.type === "library")) return items.map((it) => Object.assign(row(src, it), several ? { text: `${src.name}: ${it.title}` } : {}));
+        if (all.some((it) => it.type === "library")) {
+          return [{ text: `${src.name}: Libraries Hidden`, info: { title: src.name, desc: "Every library on this server is hidden. Show them again in Settings, On Demand." } }];
+        }
         return [{ text: `${src.name}: No Movies or Shows`, info: { title: src.name, desc: "This server has no movie or TV show libraries." } }];
       } catch (e) {
         return [{
@@ -220,7 +257,7 @@
     lv.stale = false;
     if (!quiet) { lv.rows = []; lv.sel = lv.top = 0; }
     render();
-    let res = null;
+    let res = null, extra = [];
     try {
       let rows;
       if (OD.reported) await OD.reported;
@@ -246,13 +283,15 @@
         }
         if (!rows) {
           res = await p.list(lv.src, lv.item, lv.view);
-          rows = res.items.map((it) => row(lv.src, it));
+          extra = shuffleRows(lv, res.items);
+          rows = extra.concat(titleRows(lv, res.items));
         }
       }
       if (run !== lv.run) return;
       const keep = quiet && lv.rows[lv.sel]; // where it is now
       lv.rows = rows;
-      lv.total = res && res.total != null ? res.total : rows.length;
+      // what's here, and the titles still to come
+      lv.total = res && res.total != null ? rows.length + Math.max(0, res.total - res.items.length) : rows.length;
       lv.loading = false;
       if (keep) {
         const i = rows.findIndex((r) => keep.item
@@ -272,7 +311,7 @@
       while (res && res.next) {
         const more = await res.next();
         if (run !== lv.run || !more || !more.length) break;
-        lv.rows.push(...more.map((it) => row(lv.src, it)));
+        lv.rows.push(...titleRows(lv, more));
         if (lv === cur()) render();
       }
     } catch { /* keep what came */ }
@@ -439,6 +478,21 @@
       buttons: [
         resume ? { label: `Resume from ${U.fmtDur(it.offset)}`, act: start(false) } : { label: "Play", act: start(true) },
         resume && { label: "Play from Beginning", act: start(true) },
+        it.type === "movie" && p.trailer && {
+          label: "Play Trailer",
+          act: async () => {
+            Dialog.message("Looking for the trailer...");
+            try {
+              const t = await p.trailer(src, it);
+              if (!t) { Dialog.message("There's no trailer for this movie.", true); return false; }
+              Dialog.message("Starting...");
+              await play(src, t, { fromStart: true });
+            } catch (e) {
+              Dialog.message(e.message || String(e), true);
+              return false;
+            }
+          },
+        },
         {
           label: it.watched && !resume ? "Mark as Unwatched" : "Mark as Watched",
           act: async () => {
@@ -459,13 +513,32 @@
     });
   }
 
+  /** Play a random episode of a show or season (`unwatched`: of those not watched yet). */
+  let shuffling = 0;
+  async function shuffle(src, it, unwatched) {
+    const run = ++shuffling;
+    App.osd("Shuffling...", 15000);
+    try {
+      let eps = await providers[src.type].episodes(src, it);
+      if (unwatched) eps = eps.filter((x) => !x.watched);
+      if (run !== shuffling || App.mode !== "vod") return;
+      if (!eps.length) return App.osd(unwatched ? "You've watched every episode." : "There are no episodes to play.", 3500);
+      const ep = eps[Math.floor(Math.random() * eps.length)];
+      // an episode you're partway through picks up where you left it
+      await play(src, ep, { fromStart: ep.watched || !hasResume(ep) });
+      App.osd(`Shuffle: ${epCode(ep)}`, 2500);
+    } catch (e) {
+      if (run === shuffling) App.osd(e.message || String(e), 5000);
+    }
+  }
+
   /** The channel-like object main.js and the player play. */
   function vodChannel(src, it, pl) {
     const ep = it.type === "episode" && !!it.show;
     return {
       vod: true, key: `vod|${src.id}|${it.id}`, url: pl.url, start: pl.start || 0, dur: pl.dur || it.dur,
       name: ep ? it.show : it.title,
-      call: ep ? epCode(it) : it.year ? String(it.year) : srcLabel(src),
+      call: it.extra || (ep ? epCode(it) : it.year ? String(it.year) : srcLabel(src)),
       desc: itemInfo(src, it).desc,
       subs: pl.subs || [], burn: pl.burn || null,
       src, item: it, play: pl,
@@ -593,6 +666,19 @@
     register(type, p) { providers[type] = p; },
     sources,
     hasSources: () => sources().length > 0,
+    /** A source's libraries (for Settings: hiding and showing them). */
+    async libraries(src) {
+      return (await providers[src.type].root(src)).filter((it) => it.type === "library");
+    },
+    libHidden,
+    setLibHidden(src, id, hide) {
+      const k = `${src.id}:${id}`;
+      const h = new Set(Store.cfg.vod.hiddenLibs);
+      if (hide) h.add(k); else h.delete(k);
+      Store.cfg.vod.hiddenLibs = [...h];
+      Store.save();
+      OnDemand.changed();
+    },
     /** Ways to add a source, from every provider (for Settings). */
     setups() {
       return Object.values(providers).flatMap((p) => (p.setup || []).map((s) => Object.assign({ label: p.label }, s)));
@@ -620,6 +706,7 @@
       const v = App.vod();
       if (v && v.src.id === src.id) App.stopVod();
       Store.cfg.vod.sources = Store.cfg.vod.sources.filter((s) => s.id !== src.id);
+      Store.cfg.vod.hiddenLibs = Store.cfg.vod.hiddenLibs.filter((k) => !k.startsWith(src.id + ":"));
       Store.save();
       OnDemand.changed();
     },

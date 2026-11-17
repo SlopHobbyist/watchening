@@ -10,7 +10,7 @@
  *                   buttons: Left / Right pick · OK press · Back closes
  *   guide, menus    arrows move · OK chooses · Back goes back (from the guide: the picture)
  *
- * Keys (watching): also W / S channel · A / D 5s · J ahead 10s · L back 10s · 0-9 tune
+ * Keys (watching): also W / S channel · A / D 5s · J back 10s · L ahead 10s · 0-9 tune
  *                  Space / K play/pause · C captions on/off · Shift+C subtitle options
  *                  Shift+F display options · M mute · F full screen · G guide
  *                  O On Demand · I info · P controls
@@ -1045,8 +1045,8 @@
       case "ChannelDown": surf(-1); break;
       case "ArrowRight": case "d": act.skip(e.repeat ? 15 : 5); break;
       case "ArrowLeft": case "a": act.skip(e.repeat ? -15 : -5); break;
-      case "j": case "MediaFastForward": case "MediaTrackNext": act.skip(10); break;
-      case "l": case "MediaRewind": case "MediaTrackPrevious": act.skip(-10); break;
+      case "l": case "MediaFastForward": case "MediaTrackNext": act.skip(10); break;
+      case "j": case "MediaRewind": case "MediaTrackPrevious": act.skip(-10); break;
       case " ": case "k": case "MediaPlayPause": case "MediaPlay": case "MediaPause": act.play(); break;
       case "c": case "ClosedCaptionToggle": case "Subtitle": act.cc(); break;
       case "m": act.mute(); break;
@@ -1490,6 +1490,9 @@
   };
 
   App.setPrefs = function (patch) {
+    // squish mode is for a 4:3 TV: it can't be on along with 16:9 mode
+    if (patch.squish) patch = Object.assign({}, patch, { wide: false });
+    else if (patch.wide) patch = Object.assign({}, patch, { squish: false });
     Object.assign(Store.cfg.prefs, patch);
     Store.save();
     Player.ccDefault = !!Store.cfg.prefs.ccDefault;

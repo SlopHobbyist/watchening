@@ -228,6 +228,7 @@
       count: leaf, unwatched: Math.max(0, leaf - seen), seasons: m.childCount || 0,
       aired: m.originallyAvailableAt || "",
       cat: catOf(type, genres, ctx && ctx.cat),
+      lib: m.librarySectionID != null ? String(m.librarySectionID) : "",
     };
     if (ctx && ctx.mixed && it.show) it.label = `${it.show}: ${it.title}`;
     return it;
@@ -305,6 +306,33 @@
       case "season": return paged(src, `/library/metadata/${it.id}/children`, {}, { cat: it.cat });
     }
     return { items: [], total: 0, next: null };
+  }
+
+  /** Every episode of a show (all its seasons) or of a season. */
+  async function episodes(src, it) {
+    const path = `/library/metadata/${it.id}/${it.type === "show" ? "allLeaves" : "children"}`;
+    const res = await paged(src, path, {}, { cat: it.cat });
+    const out = res.items.slice();
+    for (let more; res.next && (more = await res.next());) out.push(...more);
+    return out.filter((x) => x.type === "episode");
+  }
+
+  /** A movie's trailer, ready to play, or null. Plex lists it with the
+   *  movie's extras (its main one is the movie's primaryExtraKey). */
+  async function trailer(src, it) {
+    const isTrailer = (x) => x.subtype === "trailer" || +x.extraType === 1;
+    const m = ((await pms(src, `/library/metadata/${it.id}`, { includeExtras: 1 })).Metadata || [])[0];
+    if (!m) return null;
+    let extras = (m.Extras && m.Extras.Metadata) || [];
+    if (!extras.some(isTrailer)) {
+      try { extras = (await pms(src, `/library/metadata/${it.id}/extras`)).Metadata || []; } catch { /* none */ }
+    }
+    const trailers = extras.filter((x) => isTrailer(x) && x.ratingKey != null);
+    const t = trailers.find((x) => m.primaryExtraKey && x.key === m.primaryExtraKey) || trailers[0];
+    if (!t) return null;
+    return Object.assign(item(t), {
+      title: it.title, year: it.year, rating: "", desc: it.desc, extra: "Trailer", watched: false, offset: 0,
+    });
   }
 
   // ---------------------------------------------------------------- playing
@@ -526,7 +554,7 @@
       return `Plex Media Server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
     reconnect,
-    root, views, list, play, release, setSubtitle,
+    root, views, list, play, release, setSubtitle, episodes, trailer,
     report(src, it, pl, state, sec) { timeline(src, it, pl, state, sec); },
     stopped(src, it, pl, sec, leaving) {
       release(src, pl, leaving);

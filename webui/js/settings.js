@@ -6,7 +6,8 @@
  *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
- *   On Demand  sign in to Plex (or add a server by address), servers, picture quality
+ *   On Demand  sign in to Plex (or add a server by address), servers (and their
+ *              libraries, shown or hidden), picture quality
  *   Options    subtitle defaults, channel icons, 16:9 mode, squish mode, CORS proxy, erase everything
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
@@ -18,7 +19,7 @@
   const PAGES = [
     { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
-    { name: "On Demand", desc: "Sign in to Plex to watch the movies and shows on your media server, and choose the picture quality." },
+    { name: "On Demand", desc: "Sign in to Plex to watch the movies and shows on your media server, show or hide its libraries, and choose the picture quality." },
     { name: "Options", desc: "Subtitles, channel icons, 16:9 mode for widescreen TVs, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
   ];
   const VIS = 7;          // visible rows
@@ -178,12 +179,12 @@
       },
       {
         text: "16:9 Mode (Widescreen TV)", tag: p.wide ? "On" : "Off",
-        info: { title: "16:9 Mode", desc: "For a widescreen TV or monitor. Widens the guide and its info panel to fill a 16:9 screen, shows a half hour more of the listings, and makes the guide's picture 16:9." },
+        info: { title: "16:9 Mode", desc: "For a widescreen TV or monitor. Widens the guide and its info panel to fill a 16:9 screen, shows a half hour more of the listings, and makes the guide's picture 16:9. Turns Squish Mode off." },
         act: () => { App.setPrefs({ wide: !p.wide }); render(); },
       },
       {
         text: "Squish Mode (4:3 TV)", tag: p.squish ? "On" : "Off",
-        info: { title: "Squish Mode", desc: "For a 16:9 box whose converter squeezes the picture onto a 4:3 TV. Draws the guide and the picture wider so they look right on the TV." },
+        info: { title: "Squish Mode", desc: "For a 16:9 box whose converter squeezes the picture onto a 4:3 TV. Draws the guide and the picture wider so they look right on the TV. Turns 16:9 Mode off." },
         act: () => { App.setPrefs({ squish: !p.squish }); render(); },
       },
       {
@@ -606,6 +607,16 @@
       title: src.name,
       text: p && p.describe ? p.describe(src) : "",
       buttons: [
+        p && {
+          label: "Show & Hide Libraries",
+          act: async () => {
+            Dialog.message("Loading the libraries...");
+            let libs;
+            try { libs = await OnDemand.libraries(src); } catch (e) { Dialog.message(e.message, true); return false; }
+            if (!libs.length) { Dialog.message("This server has no movie or TV show libraries.", true); return false; }
+            librariesDialog(src, libs, 0);
+          },
+        },
         p && p.reconnect && {
           label: "Find Server Again",
           act: async () => {
@@ -622,6 +633,22 @@
         },
         { label: "Cancel" },
       ].filter(Boolean),
+    });
+  }
+
+  /** A server's libraries, each shown or hidden in On Demand; OK switches one. */
+  function librariesDialog(src, libs, sel) {
+    Dialog.open({
+      title: `${src.name}: Libraries`,
+      text: "Hidden libraries are left out of On Demand, and their titles out of Continue Watching and Recently Added.",
+      sel,
+      buttons: libs.map((lib, i) => {
+        const hidden = OnDemand.libHidden(src, lib.id);
+        return {
+          label: `${lib.title}: ${hidden ? "Hidden" : "Shown"}`,
+          act: () => { OnDemand.setLibHidden(src, lib.id, !hidden); librariesDialog(src, libs, i); },
+        };
+      }).concat([{ label: "Done" }]),
     });
   }
 
