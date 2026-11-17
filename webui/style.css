@@ -364,6 +364,44 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 }
 #v-empty.show { display: flex; }
 
+/* A library's Search: the field and an on-screen keyboard in place of the
+   buttons, in the same rounded style. A straight grid (11 columns: ten keys
+   and the Delete / Clear / Search column), so ▲▼ land right above or below.
+   No transitions anywhere: the highlight jumps, as the box's did. */
+#v-kb { position: absolute; inset: 0; display: none; }
+#vod.kb #v-kb { display: block; }
+#vod.kb #v-btns, #vod.kb #v-more, #vod.kb #v-empty { display: none; }
+#v-kb-field {
+  position: absolute; left: 60px; right: 60px; top: 20px; height: 42px; border-radius: 21px;
+  display: flex; align-items: center; padding: 0 22px 0 16px;
+  border: 2px solid #a7bbe0; background: #102a62;
+  box-shadow: 0 0 0 1px #0b1b42, inset 0 2px 4px rgba(0,0,0,.45);
+}
+#v-kb-field svg { flex: none; width: 22px; height: 22px; margin-right: 10px; fill: none; stroke: #b9c9e6; stroke-width: 2.6; stroke-linecap: round; }
+#v-kb-q { min-width: 0; overflow: hidden; white-space: pre; font-size: 25px; line-height: 30px; color: #fff; text-shadow: var(--shadow); }
+#v-kb-caret { flex: none; width: 2px; height: 26px; margin-left: 1px; background: var(--lime); animation: v-blink 1.06s step-end infinite; }
+@keyframes v-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
+#v-kb-ph { flex: none; margin-left: 4px; white-space: nowrap; font-size: 25px; line-height: 30px; color: #7f93bb; -webkit-text-stroke: 0; }
+#v-kb-field:not(.empty) #v-kb-ph { display: none; }
+#v-kb-n { flex: none; margin-left: auto; padding-left: 16px; white-space: nowrap; font-size: 21px; color: #b9c9e6; text-shadow: var(--shadow); }
+#v-kb-n.pending { opacity: .55; }
+
+#v-kb-keys {
+  position: absolute; left: 60px; right: 60px; top: 76px;
+  display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)) 132px; grid-auto-rows: 44px; gap: 7px 6px;
+}
+.v-key {
+  min-width: 0; border-radius: 10px; cursor: pointer; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #a7bbe0; background: #26498b;
+  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
+  color: #fff; text-shadow: var(--shadow); white-space: nowrap; font-size: 25px; line-height: 30px;
+}
+.v-key.act { background: #1d3c78; font-size: 22px; }
+.v-key.off { color: #8094bd; }
+.v-key.sel { border-color: #fffde4; background: #f3f0a2; color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
+.v-key.sel.off { color: #6b6f52; }
+
 #v-foot {
   position: absolute; left: 0; top: 564px; width: var(--W); height: 36px;
   background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);

@@ -308,6 +308,23 @@
     return { items: [], total: 0, next: null };
   }
 
+  /** A library's titles matching what's typed: Plex's own search (the one
+   *  its apps use as you type: word starts, best match first, "oceans" finds
+   *  "Ocean's"), else, on servers without it, titles containing the text. */
+  async function search(src, it, query) {
+    if (it.type !== "library") return { items: [], total: 0, next: null };
+    const want = it.kind === "show" ? "show" : "movie";
+    try {
+      const mc = await pms(src, "/hubs/search", { query, sectionId: it.id, limit: 100, includeCollections: 0 });
+      const hub = (mc.Hub || []).find((h) => h.type === want);
+      const items = ((hub && hub.Metadata) || []).filter((m) => m.type === want).map((m) => item(m));
+      return { items, total: items.length, next: null };
+    } catch (e) {
+      if (e.auth || e.net) throw e;
+      return paged(src, `/library/sections/${it.id}/all`, { sort: "titleSort", title: query });
+    }
+  }
+
   /** Every episode of a show (all its seasons) or of a season. */
   async function episodes(src, it) {
     const path = `/library/metadata/${it.id}/${it.type === "show" ? "allLeaves" : "children"}`;
@@ -554,7 +571,7 @@
       return `Plex Media Server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
     reconnect,
-    root, views, list, play, release, setSubtitle, episodes, trailer,
+    root, views, list, search, play, release, setSubtitle, episodes, trailer,
     report(src, it, pl, state, sec) { timeline(src, it, pl, state, sec); },
     stopped(src, it, pl, sec, leaving) {
       release(src, pl, leaving);

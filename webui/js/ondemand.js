@@ -19,6 +19,7 @@
  *     root(src)                -> [item]  its libraries and folders
  *     views(src, item)         -> [{ id, label }] | null   a library's orders / genres (its menu)
  *     list(src, item, view)    -> { items, total, next() -> [item] | null }
+ *     search(src, library, query) -> { items, total, next }   titles matching (optional)
  *     play(src, item, { fromStart, at, burn })
  *                              -> { url, start, dur, subs: [{ id, label, url, selected }], burn }
  *                                 (subs with a url are text files we show ourselves;
@@ -39,11 +40,14 @@
  *
  * Libraries can be hidden (Settings, On Demand): Store.cfg.vod.hiddenLibs.
  * A show's seasons and a season's episodes start with Shuffle and Shuffle
- * Unwatched, which play a random episode.
+ * Unwatched, which play a random episode. A library's menu starts with
+ * Search: an on-screen keyboard (see "search" below).
  *
  * Keys: ▲▼◀▶ select (in a list of titles ◀ goes back) · OK open or play ·
  *       Back up a level, and from the top to the guide · PgUp/PgDn page ·
  *       O closes (back to wherever On Demand was opened from)
+ * Search: ▲▼◀▶ OK the on-screen keys, or type on a keyboard (Enter then
+ *       searches, Backspace deletes, Delete clears) · Back leaves
  */
 (function () {
   "use strict";
@@ -251,6 +255,13 @@
   /** (Re)load a level's rows. `quiet` keeps the old rows up meanwhile and
    *  the selection on the same title. */
   async function load(lv, quiet) {
+    if (lv.kb) {
+      // the keyboard: nothing to load, but searches from before are old now
+      lv.stale = false;
+      lv.asks.clear();
+      lv.got.clear();
+      return render();
+    }
     const run = ++lv.run;
     lv.loading = true;
     lv.error = "";
@@ -269,17 +280,36 @@
           // a library: its orders and genres, on the one picked last time
           const views = (await p.views(lv.src, lv.item)) || [];
           if (run !== lv.run) return;
-          if (views.length > 1) {
+          if (views.length > 1 || p.search) {
             const it = lv.item;
             rows = views.map((v) => ({
               text: v.label, view: v,
               info: { title: v.label, chan: srcLabel(lv.src), desc: `${it.title} on ${lv.src.name}: ${v.label}.` },
             }));
-            pickSel = views.findIndex((v) => v.id === Store.cfg.vod.views[viewKey(lv.src, it)]);
+            if (p.search) {
+              rows.unshift({
+                text: "Search",
+                info: { title: "Search", chan: srcLabel(lv.src), desc: `Find something in ${it.title} by typing part of its title.` },
+                act: () => openSearch(lv),
+              });
+            }
+            const saved = Store.cfg.vod.views[viewKey(lv.src, it)];
+            pickSel = rows.findIndex((r) => r.view && r.view.id === saved);
           } else {
             lv.pick = false; // nothing to pick: straight to the list
             lv.view = views[0] || null;
           }
+        }
+        if (!rows && lv.query != null) {
+          // search results: what the keyboard already found, unless it pages
+          // (its pages were for the preview) or this is a reload
+          const f = lv.found;
+          lv.found = null;
+          let got = null;
+          if (f) { try { got = await f; } catch { /* ask again */ } }
+          if (run !== lv.run) return;
+          res = got && !got.next ? got : await p.search(lv.src, lv.item, lv.query);
+          rows = titleRows(lv, res.items);
         }
         if (!rows) {
           res = await p.list(lv.src, lv.item, lv.view);
@@ -338,7 +368,10 @@
   }
 
   // ----------------------------------------------------------------- render
-  const els = { btns: $("v-btns"), empty: $("v-empty"), more: $("v-more"), hint: $("v-hint"), pos: $("v-pos") };
+  const els = {
+    vod: $("vod"), btns: $("v-btns"), empty: $("v-empty"), more: $("v-more"), hint: $("v-hint"), pos: $("v-pos"),
+    field: $("v-kb-field"), q: $("v-kb-q"), n: $("v-kb-n"), keys: $("v-kb-keys"),
+  };
 
   function div(cls, text) {
     const d = document.createElement("div");
@@ -353,6 +386,8 @@
   function render() {
     if (App.mode !== "vod" || !cur()) return;
     const lv = cur();
+    els.vod.classList.toggle("kb", !!lv.kb);
+    if (lv.kb) return kbRender(lv);
     const n = lv.rows.length, c = cols(lv), wide = c === 1;
     const nRows = Math.ceil(n / c);
     lv.sel = U.clamp(lv.sel, 0, Math.max(0, n - 1));
@@ -383,7 +418,8 @@
     els.btns.replaceChildren(frag);
     for (const [el, t] of toFit) U.fitText(el, t, true);
 
-    const msg = n ? "" : lv.loading ? "Loading..." : lv.error ? lv.error : lv.root ? "Nothing to show." : "Nothing here.";
+    const msg = n ? "" : lv.loading ? "Loading..." : lv.error ? lv.error : lv.root ? "Nothing to show."
+      : lv.query != null ? `Nothing in ${lv.item.title} matches "${lv.query}".` : "Nothing here.";
     els.empty.textContent = msg;
     els.empty.classList.toggle("show", !!msg);
     els.more.classList.toggle("up", lv.top > 0);
@@ -412,7 +448,10 @@
   // ------------------------------------------------------------- navigation
   /** Up or down `d` rows of buttons (a button per row in lists, two in menus). */
   function vert(d) {
-    const lv = cur(), n = lv.rows.length;
+    const lv = cur();
+    if (!lv) return;
+    if (lv.kb) return kbMove(lv, Math.sign(d), 0);
+    const n = lv.rows.length;
     if (!n) return;
     const c = cols(lv);
     const i = U.clamp(lv.sel + d * c, 0, n - 1);
@@ -455,6 +494,249 @@
     if (!r.item) return;
     if (playable(r.item)) return itemDialog(r);
     push({ title: levelTitle(r.item), src: r.src, item: r.item, pick: r.item.type === "library" });
+  }
+
+  // ----------------------------------------------------------------- search
+  /*
+   * A library's Search: the field and an on-screen keyboard in place of the
+   * buttons. QWERTY with the numbers above, laid out like a computer's
+   * keyboard (Delete where Backspace is, Search where Enter is, a wide Space
+   * at the bottom), but on a straight grid so ▲▼ always land on the key
+   * right above or below, and ◀▶ wrap around a row. Going down onto Space
+   * and back up returns to the same column.
+   *
+   * Letters come out capitalized at the start of a word ("The Matrix").
+   * What matches shows in the info panel as you type, a moment after the
+   * last key (each search is kept, so Delete brings an earlier one back at
+   * once); Search lists it all as an ordinary list of titles, and Back from
+   * there returns to the keyboard with the text still in it.
+   *
+   * Speed: the keys are made once and stay; moving only moves the
+   * highlight (two class changes), typing only changes the field's text.
+   * Nothing else is drawn until a search comes back.
+   */
+  const KB = [
+    [..."1234567890", { act: "del", label: "Delete" }],
+    [..."QWERTYUIOP", { act: "clear", label: "Clear" }],
+    [..."ASDFGHJKL'", { act: "go", label: "Search" }],
+    [..."ZXCVBNM", { act: "space", label: "Space", span: 4 }],
+  ];
+  const KB_COLS = 11, Q_MAX = 40, WAIT = 200;
+  /** keys: [{ el, r, c0, c1, ch | act }] · grid[row][col] -> key index · sel: highlighted key */
+  const kb = { keys: [], grid: [], sel: -1 };
+  const norm = (q) => q.trim().replace(/\s+/g, " ").toLowerCase();
+  const matches = (n) => (n === 1 ? "1 Match" : `${n || "No"} Matches`);
+
+  function kbBuild() {
+    if (kb.keys.length) return;
+    const frag = document.createDocumentFragment();
+    KB.forEach((row, r) => {
+      kb.grid[r] = [];
+      let c = 0;
+      for (const k of row) {
+        const o = typeof k === "string" ? { ch: k, label: k } : k;
+        const span = o.span || 1;
+        const key = Object.assign({ r, c0: c, c1: c + span - 1 }, o);
+        key.el = div("v-key" + (o.act ? " act" : ""), o.label);
+        if (span > 1) key.el.style.gridColumn = `span ${span}`;
+        const i = kb.keys.push(key) - 1;
+        key.el.addEventListener("click", () => {
+          const lv = cur();
+          if (App.mode !== "vod" || !lv || !lv.kb) return;
+          lv.typed = false;
+          kbSelect(lv, i);
+          kbPress(lv, i, false);
+        });
+        frag.appendChild(key.el);
+        for (let x = c; x < c + span; x++) kb.grid[r][x] = i;
+        c += span;
+      }
+    });
+    els.keys.appendChild(frag);
+  }
+
+  function openSearch(lib) {
+    kbBuild();
+    OD.stack.push(level({
+      kb: true, title: `${lib.item.title}: Search`, src: lib.src, item: lib.item, loading: false,
+      q: "",                // what's typed
+      ki: kb.grid[1][0], goal: 0, // the highlighted key (on Q to start); the column ▲▼ aim for
+      typed: false,         // the last key was typed on a keyboard (then Enter searches)
+      asks: new Map(), got: new Map(), // searches so far: query -> promise, and -> result
+      res: null, for: "", err: "", pending: false, timer: 0,   // the search showing, and for what
+    }));
+    render();
+  }
+
+  function kbSelect(lv, i) {
+    lv.ki = i;
+    if (kb.sel === i) return;
+    if (kb.sel >= 0) kb.keys[kb.sel].el.classList.remove("sel");
+    kb.keys[i].el.classList.add("sel");
+    kb.sel = i;
+  }
+
+  /** ◀▶ along a row (wrapping), ▲▼ to the key in the same column. */
+  function kbMove(lv, dr, dc) {
+    const k = kb.keys[lv.ki];
+    if (dc) {
+      const i = kb.grid[k.r][(dc > 0 ? k.c1 + 1 : k.c0 - 1 + KB_COLS) % KB_COLS];
+      const t = kb.keys[i];
+      lv.goal = dc > 0 ? t.c0 : t.c1;
+      return kbSelect(lv, i);
+    }
+    const r = k.r + dr;
+    if (r >= 0 && r < KB.length) kbSelect(lv, kb.grid[r][lv.goal]);
+  }
+
+  function kbPress(lv, i, repeat) {
+    const k = kb.keys[i];
+    if (repeat && k.act !== "del") return; // holding OK repeats Delete only
+    switch (k.act) {
+      case "del": return kbEdit(lv, lv.q.slice(0, -1));
+      case "clear": return kbEdit(lv, "");
+      case "space": return kbType(lv, " ");
+      case "go": return kbGo(lv);
+    }
+    const ch = /[A-Z]/.test(k.ch) && !/(^|\s)$/.test(lv.q) ? k.ch.toLowerCase() : k.ch;
+    kbType(lv, ch);
+  }
+
+  function kbType(lv, ch) {
+    if (ch === " " && (!lv.q || lv.q.endsWith(" "))) return;
+    if (lv.q.length >= Q_MAX) return;
+    kbEdit(lv, lv.q + ch);
+  }
+
+  function kbEdit(lv, q) {
+    if (q === lv.q) return;
+    lv.q = q;
+    kbField(lv);
+    kbSearch(lv);
+  }
+
+  /** Search for what's typed, once typing pauses; one already made shows at once. */
+  function kbSearch(lv) {
+    clearTimeout(lv.timer);
+    const q = norm(lv.q);
+    if (q === lv.for && lv.res) { lv.pending = false; return kbCount(lv); } // only a space more
+    if (!q) {
+      Object.assign(lv, { res: null, for: "", err: "", pending: false });
+      return kbShow(lv);
+    }
+    if (lv.got.has(q)) return kbFound(lv, q, lv.got.get(q), "");
+    lv.pending = true;
+    kbCount(lv);
+    lv.timer = setTimeout(() => kbAsk(lv, q), WAIT);
+  }
+
+  /** The search for q, asked of the server only once (a failed one is asked again). */
+  function ask(lv, q) {
+    if (!lv.asks.has(q)) {
+      const pr = providers[lv.src.type].search(lv.src, lv.item, q);
+      lv.asks.set(q, pr);
+      pr.then((res) => lv.got.set(q, res), () => lv.asks.delete(q));
+    }
+    return lv.asks.get(q);
+  }
+  async function kbAsk(lv, q) {
+    let res = null, err = "";
+    try { res = await ask(lv, q); } catch (e) { err = e.message || String(e); }
+    if (norm(lv.q) === q) kbFound(lv, q, res, err); // still what's typed
+  }
+
+  function kbFound(lv, q, res, err) {
+    Object.assign(lv, { res, for: q, err, pending: false });
+    kbShow(lv);
+  }
+
+  /** Searching opens the matches as a list of titles. */
+  function kbGo(lv) {
+    const q = norm(lv.q);
+    if (!q) return;
+    if (lv.for === q && lv.res && !lv.res.items.length) return; // nothing to list
+    if (lv.pending) { clearTimeout(lv.timer); kbAsk(lv, q); } // no need to wait
+    push({ title: `${lv.item.title}: "${lv.q.trim()}"`, src: lv.src, item: lv.item, query: q, found: ask(lv, q) });
+  }
+
+  // drawing: each part separately, so a key press redraws only what it changed
+  function kbField(lv) {
+    els.q.textContent = lv.q;
+    els.field.classList.toggle("empty", !lv.q);
+    if (lv.q.length > 20) els.q.scrollLeft = els.q.scrollWidth; // keep the end in view
+  }
+  function kbCount(lv) {
+    const q = norm(lv.q);
+    const n = lv.res ? lv.res.total != null ? lv.res.total : lv.res.items.length : 0;
+    els.n.textContent = !q ? "" : lv.err && !lv.pending ? "Not Available"
+      : lv.res ? matches(n) : "Searching...";
+    els.n.classList.toggle("pending", !!q && lv.pending);
+    kb.keys[kb.grid[2][10]].el.classList.toggle("off", !q || (!lv.pending && lv.for === q && !!lv.res && !n));
+  }
+  function kbInfo(lv) {
+    const lib = lv.item, q = lv.q.trim();
+    const title = `"${q}"`, chan = srcLabel(lv.src);
+    let info;
+    if (!q) {
+      info = {
+        title: `Search ${lib.title}`, chan,
+        desc: "Type part of a title, here or on a keyboard. What matches shows here as you type; Search lists it.",
+      };
+    } else if (lv.err) info = { title, chan: "Not Available", desc: `${lv.err}. Type again to try again.` };
+    else if (!lv.res) info = { title, chan, desc: "Searching..." };
+    else if (!lv.res.items.length) info = { title, chan, desc: `Nothing in ${lib.title} matches.` };
+    else {
+      info = {
+        title, chan,
+        desc: lv.res.items.slice(0, 16).map((it) => (it.year ? `${it.title} (${it.year})` : it.title)).join(", "),
+      };
+    }
+    App.showInfo(Object.assign({ head: headOf(lv) }, info));
+  }
+  /** A search came back (or the text was cleared). */
+  function kbShow(lv) {
+    if (App.mode !== "vod" || lv !== cur()) return;
+    kbCount(lv);
+    kbInfo(lv);
+  }
+  function kbRender(lv) {
+    kbSelect(lv, lv.ki);
+    kbField(lv);
+    kbCount(lv);
+    kbInfo(lv);
+    els.hint.textContent = "▲▼◀▶ Select · OK Type · Back Previous Menu";
+    els.pos.textContent = "";
+  }
+
+  /** Keys on the Search screen. A keyboard's own keys type (letters, WASD
+   *  included); arrows and a remote move over the on-screen keys. */
+  function kbKey(e, lv) {
+    const k = e.key;
+    if (k.length === 1 && /[\p{L}\p{N}\p{P}\p{S} ]/u.test(k)) {
+      lv.typed = true;
+      kbType(lv, k);
+      return true;
+    }
+    if (k === "Backspace") {
+      if (lv.q) kbEdit(lv, lv.q.slice(0, -1));
+      else if (!e.repeat) back();
+      return true;
+    }
+    if (k === "Delete" || k === "Clear") { kbEdit(lv, ""); return true; }
+    if (k === "Tab") return true;
+    switch (U.nav(e)) {
+      case "up": lv.typed = false; kbMove(lv, -1, 0); break;
+      case "down": lv.typed = false; kbMove(lv, 1, 0); break;
+      case "left": lv.typed = false; kbMove(lv, 0, -1); break;
+      case "right": lv.typed = false; kbMove(lv, 0, 1); break;
+      case "ok":
+        // typing on a keyboard: Enter searches; on a remote OK presses the key
+        if (lv.typed && k === "Enter") { if (!e.repeat) kbGo(lv); } else kbPress(lv, lv.ki, e.repeat);
+        break;
+      case "back": clearTimeout(lv.timer); back(); break;
+      default: return false;
+    }
+    return true;
   }
 
   // ----------------------------------------------------------------- titles
@@ -641,6 +923,7 @@
     const k = e.key, nav = U.nav(e);
     const lv = cur();
     if (!lv) return false;
+    if (lv.kb) return kbKey(e, lv);
     switch (nav || k) {
       case "up": vert(-1); break;
       case "down": vert(1); break;
