@@ -327,8 +327,8 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
   position: absolute; height: 42px; border-radius: 21px; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 22px;
   border: 2px solid #a7bbe0;
-  background: linear-gradient(#3159a0, #254b8e 45%, #1d3f80);
-  box-shadow: 0 0 0 1px #0b1b42, inset 0 1px 0 rgba(255,255,255,.22), 2px 2px 3px rgba(0,0,0,.4);
+  background: #26498b;
+  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
   color: #fff; text-shadow: var(--shadow);
 }
 .v-btn.c0, .v-btn.c1 { width: calc((var(--W) - 128px) / 2); }
@@ -342,8 +342,8 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 .v-btn.warn .v-t { color: #ffc3ad; }
 .v-btn.sel {
   border-color: #fffde4;
-  background: linear-gradient(#fdfbcc, #f4f1a6 45%, #e7e386);
-  box-shadow: 0 0 0 1px #0b1b42, inset 0 1px 0 rgba(255,255,255,.6), 2px 2px 3px rgba(0,0,0,.4);
+  background: #f3f0a2;
+  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
 }
 .v-btn.sel, .v-btn.sel .v-t, .v-btn.sel .v-left, .v-btn.sel .v-tag { color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
 .v-btn.sel .v-left, .v-btn.sel .v-tag { color: #4d5236; }
