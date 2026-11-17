@@ -472,12 +472,16 @@
       }
     };
     const info = itemInfo(src, it);
+    // the title playing in the picture now: back to it, rather than starting it again
+    const v = App.vod();
+    const now = !!v && v.src.id === src.id && v.item.id === it.id && !v.item.extra;
     Dialog.open({
       title: it.type === "episode" && it.show ? `${it.show}: ${it.title}` : it.title,
-      text: [info.time, it.rating].filter(Boolean).join(" · "),
+      text: now ? "Playing now." : [info.time, it.rating].filter(Boolean).join(" · "),
       buttons: [
-        resume ? { label: `Resume from ${U.fmtDur(it.offset)}`, act: start(false) } : { label: "Play", act: start(true) },
-        resume && { label: "Play from Beginning", act: start(true) },
+        now ? { label: "Keep Watching", act: () => App.watch() }
+          : resume ? { label: `Resume from ${U.fmtDur(it.offset)}`, act: start(false) } : { label: "Play", act: start(true) },
+        (resume || now) && { label: "Play from Beginning", act: start(true) },
         it.type === "movie" && p.trailer && {
           label: "Play Trailer",
           act: async () => {

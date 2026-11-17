@@ -398,7 +398,6 @@
     layoutTv();
   }
   App.openGuide = function () {
-    stopVod();
     setMode("guide");
     S.ws = nowSlot();
     S.focus = Date.now();
@@ -431,19 +430,20 @@
   /*
    * On Demand: its lists replace the guide's listings (the header, info and
    * picture stay). A title plays full screen like a channel, with the same
-   * banner and controls; Back (or the end of it) returns to the lists and
-   * the picture goes back to the channel you were on.
+   * banner and controls; Back returns to the lists. Like a channel, it keeps
+   * playing in the guide's picture while you browse the lists, the guide or
+   * Settings, until you tune a channel or play something else. When it ends,
+   * the channel you were on comes back.
    */
   let vodFrom = "guide";
   App.openOnDemand = function () {
-    if (!S.vod && (App.mode === "guide" || App.mode === "watch")) vodFrom = App.mode;
-    stopVod();
+    if (App.mode === "guide" || App.mode === "watch") vodFrom = App.mode;
     setMode("vod");
     OnDemand.open();
   };
   /** Back from On Demand's top list: to the guide, or the picture it was opened from. */
   App.closeOnDemand = function () {
-    if (vodFrom === "watch" && N()) App.watch();
+    if (vodFrom === "watch" && (N() || S.vod)) App.watch();
     else App.openGuide();
   };
   /** Play an On Demand title. `replace`: the same title again (another
@@ -480,7 +480,7 @@
   function enter() {
     if (!N()) return OnDemand.hasSources() ? App.openOnDemand() : App.openMenu();
     const ch = App.channels[S.sel];
-    if (ch.key !== S.tunedKey) tune(S.sel);
+    if (S.vod || ch.key !== S.tunedKey) tune(S.sel); // (tuning stops an On Demand title)
     App.watch();
   }
 
@@ -1010,7 +1010,13 @@
       if (pbarShown()) renderPbar();
       if (type === "state" && App.mode === "watch" && bannerShown() && !Player.loading) showBanner();
     }
-    if (type === "ended" && S.vod && Player.ch === S.vod) App.openOnDemand();
+    // an On Demand title ended: the channel comes back on (watching it full
+    // screen: back to the lists)
+    if (type === "ended" && S.vod && Player.ch === S.vod) {
+      stopVod();
+      if (App.mode === "watch") App.openOnDemand();
+      else if (App.mode === "vod") OnDemand.open();
+    }
     if (type === "cc" || type === "tracks" || type === "size") Panel.refresh();
   });
 
@@ -1071,13 +1077,13 @@
       case "left": e.shiftKey ? shiftDay(-1) : moveLeft(); return true;
       case "right": e.shiftKey ? shiftDay(1) : moveRight(); return true;
       case "ok": enter(); return true;
-      case "back": if (N()) App.watch(); return true;
+      case "back": if (N() || S.vod) App.watch(); return true;
     }
     switch (k) {
       case "PageUp": case "ChannelUp": page(-1); break;
       case "PageDown": case "ChannelDown": page(1); break;
       case " ": enter(); break;
-      case "g": case "G": case "Guide": if (N()) App.watch(); break;
+      case "g": case "G": case "Guide": if (N() || S.vod) App.watch(); break;
       case "o": case "O": App.openOnDemand(); break;
       default: return false;
     }
