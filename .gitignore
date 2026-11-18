@@ -1,5 +1,7 @@
 # Project Specific
 inspiration/
+# your settings and keys (copy .env.example to make it)
+.env
 # first sign-in file and other local data (see docker-compose.yaml)
 data/
 # your own compose changes, such as Traefik labels (see docs/DEPLOYING.md)

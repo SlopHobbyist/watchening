@@ -32,6 +32,8 @@ Some Linux systems require `sudo` in front of the `docker` commands.
 
 The voice search image is for x86-64 (amd64) machines. On an ARM server
 (such as a Raspberry Pi), see the note above `speech:` in `docker-compose.yaml`.
+On an older x86-64 CPU without AVX2 (voice search keeps restarting with exit
+code 132), build it for your CPU instead: see `speech/Dockerfile`.
 
 Open <http://localhost:8080> and sign in as `admin` with the password from the
 log. If you missed it, it's also printed to `data/admin-login.txt`.

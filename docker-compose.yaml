@@ -207,7 +207,8 @@ services:
   # connection; it's turned into text in memory and nothing is kept. The
   # model (one of FUTO's, see speech/start.sh) is downloaded on the first
   # start, 45 MB for english-39. This image is amd64; on an arm64 server use
-  # main-arm64-<the same commit> instead.
+  # main-arm64-<the same commit> instead. If it keeps restarting with exit
+  # code 132, the CPU is too old for it (no AVX2): see speech/Dockerfile.
   speech:
     image: ghcr.io/ggml-org/whisper.cpp:main-aba02defd6bb6ff5de63721c21e3456645c153e2
     container_name: watchening-speech
