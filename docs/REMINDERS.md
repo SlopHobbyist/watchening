@@ -44,7 +44,7 @@ networks:
     external: true
 ```
 
-- [ ] Route **only `webui`**. Kratos, the accounts service and MediaFlow must
+- [ ] Route **only `webui`**. Kratos, the accounts service, MediaFlow and AIOStreams must
       stay internal; nginx is the only door, and it's what checks sign-ins and
       adds MediaFlow's password.
 - [ ] Don't add a buffering middleware on this router: live streams go through
@@ -107,12 +107,39 @@ networks:
       through `/proxy/` (that's how ErsatzTV and HDHomeRun work). Only give
       accounts to people you'd let on your network.
 
+## Stremio addons and debrid (AIOStreams)
+
+- [ ] **Keep AIOStreams' own page off the internet.** It's published on
+      `127.0.0.1:3001` (`AIOSTREAMS_PORT`), this machine only. To set it up
+      from your computer, use an SSH tunnel
+      (`ssh -L 3001:127.0.0.1:3001 server`, then <http://localhost:3001/stremio/configure>)
+      rather than publishing it. Don't route it in Traefik.
+- [ ] Its links are made on `PUBLIC_URL` (setup gives it the same address),
+      and only `/jellyfin/` and `/api/v1/proxy/` reach it, through nginx, for
+      signed-in visitors. Set `PUBLIC_URL` before you configure it: links in
+      setups saved under another address won't work.
+- [ ] Every stream it hands out comes through its proxy (forced in
+      `aiostreams.env`, which setup writes), so the debrid service sees only
+      the server's address. **Grey cloud** matters even more here: films are
+      big, and they all go through the server.
+- [ ] Don't add a buffering middleware for `/api/v1/proxy/` either: streams
+      are long and need Range requests (seeking) to pass straight through.
+- [ ] Its admin sign-in is in `data/aiostreams-login.txt` (and in the setup
+      log the first time). It comes from the `auth-secrets` volume and can't be
+      changed on its page.
+- [ ] The setup you make there holds your debrid API key, and anyone signed
+      in to it in Watchening (UUID and password, or Quick Connect) streams on
+      your debrid account. Group settings carry that sign-in to everyone in
+      the group, as with Plex and Jellyfin.
+
 ## Keep safe
 
 - [ ] **Back up** the `watchening_kratos-db` volume (the accounts),
-      `watchening_auth-secrets` (the keys) and the `data/` folder (everyone's
+      `watchening_auth-secrets` (the keys), `watchening_aiostreams-data`
+      (AIOStreams' setups; they can only be opened with the key in
+      auth-secrets) and the `data/` folder (everyone's
       saved settings, the groups and uploaded playlists, in `data/settings/`).
-      Losing the secrets signs everyone out; losing the database loses the
+      Losing the secrets signs everyone out (and locks AIOStreams' setups); losing the database loses the
       accounts (a new admin is made on the next start). Saved settings are
       filed by account id, so they only match the accounts database they were
       made with.

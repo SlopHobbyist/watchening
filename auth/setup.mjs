@@ -2,8 +2,8 @@
  * Runs before everything else on each `docker compose up` and exits.
  *
  * First start: makes the random secrets (Kratos's cookie and encryption keys,
- * MediaFlow's API password) and keeps them in the auth-secrets volume, so no
- * one has to invent or copy keys by hand. Every start: writes the config files
+ * MediaFlow's API password, AIOStreams' keys and passwords) and keeps them in
+ * the auth-secrets volume, so no one has to invent or copy keys by hand. Every start: writes the config files
  * that depend on .env (the site's address) for the services that read them:
  *
  *   /secrets/secrets.json          the secrets (made once, never rewritten)
@@ -11,6 +11,8 @@
  *   /secrets/kratos-flags          Kratos: --dev for a plain-http site
  *   /secrets/mediaflow.env         MediaFlow: API_PASSWORD
  *   /secrets/nginx-mediaflow.conf  nginx: hands MediaFlow its password
+ *   /secrets/aiostreams.env        AIOStreams: address, keys, its proxy, debrid key
+ *   /data/aiostreams-login.txt     AIOStreams' admin sign-in (its own page)
  *
  * Files are rewritten in place (not replaced), since the services mount
  * single files out of the volume and a replaced file wouldn't show up there.
@@ -47,11 +49,16 @@ const secretsFile = `${DIR}/secrets.json`;
 let secrets = {};
 try { secrets = JSON.parse(fs.readFileSync(secretsFile, "utf8")); } catch { /* first start */ }
 let made = false;
-for (const [k, n] of [["kratosCookie", 48], ["kratosCipher", 32], ["mediaflowPassword", 40]]) {
+for (const [k, n] of [["kratosCookie", 48], ["kratosCipher", 32], ["mediaflowPassword", 40], ["aiostreamsAdmin", 20], ["aiostreamsProxy", 40]]) {
   if (typeof secrets[k] !== "string" || secrets[k].length < n) {
     secrets[k] = token(n);
     made = true;
   }
+}
+// AIOStreams encrypts its saved setups with this: 64 hex characters, never changed
+if (!/^[0-9a-f]{64}$/.test(secrets.aiostreamsKey || "")) {
+  secrets.aiostreamsKey = crypto.randomBytes(32).toString("hex");
+  made = true;
 }
 if (secrets.kratosCipher.length !== 32) fail("secrets.json: kratosCipher must be exactly 32 characters");
 
@@ -108,6 +115,41 @@ write(`${DIR}/kratos-flags`, HTTPS ? "" : "--dev\n");
 write(`${DIR}/mediaflow.env`, `API_PASSWORD=${secrets.mediaflowPassword}\n`);
 write(`${DIR}/nginx-mediaflow.conf`, `proxy_set_header api_password "${secrets.mediaflowPassword}";\n`);
 
+// ------------------------------------------------------------- AIOStreams
+// Stremio addons and debrid services, for On Demand (see docker-compose.yaml).
+// Its links are on this site's address: nginx passes /jellyfin/ (its media
+// server, which On Demand talks to) and /api/v1/proxy/ (its stream proxy) to
+// it. Every stream goes through that proxy, so the debrid service sees only
+// this server's address, however many people watch at once.
+//   admin   signs in to its own page (AIOSTREAMS_PORT), where the addons and
+//           the debrid service are set up
+//   proxy   only the stream proxy: what its links are made with
+const DEBRID = { realdebrid: 1, alldebrid: 1, premiumize: 1, debridlink: 1, torbox: 1, easydebrid: 1, debrider: 1 };
+const debridService = (process.env.DEBRID_SERVICE || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+const debridKey = (process.env.DEBRID_API_KEY || "").trim();
+if (debridKey && !DEBRID[debridService]) {
+  fail(`DEBRID_SERVICE in .env must be one of ${Object.keys(DEBRID).join(", ")} (it is "${process.env.DEBRID_SERVICE || ""}")`);
+}
+/** A value for a file `sh` reads (`. file`): single-quoted. */
+const sq = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
+const aio = {
+  BASE_URL: ORIGIN,
+  SECRET_KEY: secrets.aiostreamsKey,
+  AIOSTREAMS_AUTH: `admin:${secrets.aiostreamsAdmin},proxy:${secrets.aiostreamsProxy}`,
+  AIOSTREAMS_AUTH_PERMISSIONS: "proxy=proxy",
+  // its configure page needs the admin's sign-in
+  AIOSTREAMS_AUTH_REQUIRED: "true",
+  // every stream through its own proxy, on this server
+  FORCE_PROXY_ENABLED: "true",
+  FORCE_PROXY_ID: "builtin",
+  FORCE_PROXY_URL: ORIGIN,
+  FORCE_PROXY_CREDENTIALS: `proxy:${secrets.aiostreamsProxy}`,
+};
+if (debridKey) aio.DEFAULT_SERVICE_CREDENTIALS = `${debridService}.apiKey=${debridKey}`;
+write(`${DIR}/aiostreams.env`,
+  "# Written by auth/setup.mjs from .env on every start. Don't edit; it's replaced.\n" +
+  Object.entries(aio).map(([k, v]) => `${k}=${sq(v)}\n`).join(""), 0o600);
+
 // the accounts service runs as the "node" user and writes the first sign-in file here
 try {
   fs.mkdirSync(DATA, { recursive: true });
@@ -115,5 +157,19 @@ try {
 } catch (e) {
   console.warn(`setup: couldn't prepare ./data (${e.message}); the first sign-in will only be shown in the logs`);
 }
+
+// AIOStreams' own page: its admin sign-in, kept where the admin can find it
+const aioLogin = `${DATA}/aiostreams-login.txt`;
+try {
+  write(aioLogin, `AIOStreams (Stremio addons and debrid, for On Demand)
+Open its page on the server: http://localhost:${(process.env.AIOSTREAMS_PORT || "127.0.0.1:3001").split(":").pop()}/stremio/configure
+Username: admin
+Password: ${secrets.aiostreamsAdmin}
+`, 0o600);
+  fs.chownSync(aioLogin, 1000, 1000);
+} catch (e) {
+  console.warn(`setup: couldn't write ${aioLogin} (${e.message})`);
+}
+if (made) console.log(`setup: AIOStreams sign-in (its own page): admin / ${secrets.aiostreamsAdmin}  (also in data/aiostreams-login.txt)`);
 
 console.log(`setup: ${made ? "made new secrets; " : ""}configured for ${ORIGIN}${HTTPS ? "" : " (plain http)"}`);

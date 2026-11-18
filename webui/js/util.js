@@ -120,14 +120,16 @@
    *   proxy  MediaFlow Proxy's path ("/proxy/"): streams, playlists and icons
    *          from http:// on an https:// page, and servers that block web
    *          pages (CORS). nginx adds its password.
+   *   aiostreams  AIOStreams' media server ("/jellyfin"): Stremio addons and
+   *          a debrid service, for On Demand (see jellyfin.js)
    */
-  U.server = { known: false, auth: false, user: null, proxy: "" };
+  U.server = { known: false, auth: false, user: null, proxy: "", aiostreams: "" };
   U.serverReady = (async () => {
     try {
       const res = await fetch("/api/me", { cache: "no-store", headers: { Accept: "application/json" } });
       if (res.ok) {
         const d = await res.json();
-        Object.assign(U.server, { known: true, auth: !!d.auth, user: d.user || null, proxy: d.streamProxy || "" });
+        Object.assign(U.server, { known: true, auth: !!d.auth, user: d.user || null, proxy: d.streamProxy || "", aiostreams: d.aiostreams || "" });
       }
     } catch { /* no accounts service here */ }
     return U.server;

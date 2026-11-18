@@ -2,6 +2,21 @@
  * Jellyfin, as an On Demand source (see ondemand.js for what a provider does).
  * Jellyfin 10.9 or later.
  *
+ * Also "Stremio": AIOStreams (docker-compose.yaml) serves Stremio addons'
+ * catalogs and streams as a Jellyfin server, at /jellyfin on this site, so
+ * the same code talks to it (src.type "stremio"; aio(src) below), with these
+ * differences:
+ *   - libraries are the addons' catalogs, each in its own order (sorting
+ *     isn't offered); some only list once a genre is picked (genreRequired)
+ *   - Continue Watching asks for everything at once (per library it's empty)
+ *   - a title's versions are the streams the addons found, files your debrid
+ *     service already has first. Nothing is converted, so we pick the first
+ *     one this browser can play (by its container and codecs); Choose Version
+ *     lists them all. Each comes through AIOStreams' proxy on this server
+ *     (/api/v1/proxy/), so the debrid service only sees the server's
+ *     address; a version that doesn't is never played.
+ *   - only subtitle files from addons; ones inside the video can't be fetched
+ *
  * Signing in: Jellyfin has nothing like plex.tv to find servers for you, so
  * you give the server's address first (just "192.168.1.20" will do: we try
  * port 8096, then https). Then Quick Connect, made for TVs: the server hands
@@ -59,7 +74,7 @@
    * refused) and `status`.
    */
   async function call(base, path, opts) {
-    const { token, params, method = "GET", body, timeout = 15000, keepalive } = opts || {};
+    const { token, params, method = "GET", body, timeout = 15000, keepalive, who = "Jellyfin" } = opts || {};
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeout);
     const headers = { Accept: "application/json", Authorization: authHeader(token) };
@@ -75,13 +90,14 @@
     } finally {
       clearTimeout(timer);
     }
-    if (res.status === 401) throw Object.assign(new Error("Jellyfin didn't accept the sign-in. Sign in again in Settings"), { auth: true, status: 401 });
-    if (!res.ok) throw Object.assign(new Error(`Jellyfin answered ${res.status}${res.statusText ? " " + res.statusText : ""}`), { status: res.status });
+    if (res.status === 401) throw Object.assign(new Error(`${who} didn't accept the sign-in. Sign in again in Settings`), { auth: true, status: 401 });
+    if (!res.ok) throw Object.assign(new Error(`${who} answered ${res.status}${res.statusText ? " " + res.statusText : ""}`), { status: res.status });
     const text = await res.text();
-    try { return text ? JSON.parse(text) : {}; } catch { throw new Error("Jellyfin sent an answer this player doesn't understand"); }
+    try { return text ? JSON.parse(text) : {}; } catch { throw new Error(`${who} sent an answer this player doesn't understand`); }
   }
   /** A request to a source's server, signed in. */
-  const api = (src, path, params, opts) => call(src.server.uri, path, Object.assign({}, opts, { token: src.server.token, params }));
+  const api = (src, path, params, opts) =>
+    call(src.server.uri, path, Object.assign({ who: src.type === "stremio" ? "AIOStreams" : "Jellyfin" }, opts, { token: src.server.token, params }));
   /** Query parameters, with the signed-in user. */
   const user = (src, params) => Object.assign({ userId: src.server.userId }, params);
   /** Fire and forget (progress reports): `keepalive` lets it outlive the page. */
@@ -173,33 +189,60 @@
   const none = () => ({ items: [], total: 0, next: null });
 
   const PAGE = 300;
-  /** A list, a page at a time: { items, total, next } */
-  async function paged(src, path, q, ctx, max) {
+  /** A list, a page at a time: { items, total, next }. `rough`: the server's
+   *  total is only a guess while there's more (AIOStreams), so pages are
+   *  asked for until one comes back short. */
+  async function paged(src, path, q, ctx, max, rough) {
+    const cap = max || Infinity;
     const page = async (start, size) => {
       const r = await api(src, path, Object.assign({ fields: FIELDS, enableImages: false, enableTotalRecordCount: true }, q, { startIndex: start, limit: size }));
       return { items: (r.Items || []).map((m) => item(m, ctx)), total: r.TotalRecordCount };
     };
-    const first = await page(0, Math.min(PAGE, max || PAGE));
+    const size0 = Math.min(PAGE, cap);
+    const first = await page(0, size0);
     let pos = first.items.length;
-    const total = Math.min(first.total != null ? first.total : pos, max || Infinity);
+    let total = Math.min(first.total != null ? first.total : pos, cap);
+    // a full page: maybe more
+    if (rough) total = first.items.length >= size0 ? Math.min(Math.max(total, pos + 1), cap) : pos;
     const res = { items: first.items, total, next: null };
     if (pos < total) {
       res.next = async () => {
         if (pos >= total) return null;
-        const p = await page(pos, Math.min(PAGE, total - pos));
+        const size = Math.min(PAGE, (rough ? cap : total) - pos);
+        const p = await page(pos, size);
         pos += p.items.length;
+        if (rough) total = p.items.length >= size ? Math.min(Math.max(total, pos + 1), cap) : pos;
         return p.items.length ? p.items : null;
       };
     }
     return res;
   }
 
-  /** The user's movie and TV show libraries. */
+  /** AIOStreams (Stremio addons), rather than Jellyfin itself. */
+  const aio = (src) => src.type === "stremio";
+
+  /** The user's movie and TV show libraries. (AIOStreams: its catalogs, some
+   *  of them movies and shows together; not its collections, live TV or
+   *  playlists.) */
   async function libraries(src) {
     const r = await api(src, "/UserViews", user(src));
-    return (r.Items || [])
-      .filter((d) => d.CollectionType === "movies" || d.CollectionType === "tvshows")
-      .map((d) => ({ id: d.Id, type: "library", kind: d.CollectionType === "tvshows" ? "show" : "movie", title: d.Name || "Library" }));
+    const a = aio(src);
+    const views = (r.Items || []).filter((d) => d.CollectionType === "movies" || d.CollectionType === "tvshows" || (a && !d.CollectionType));
+    // catalogs often come in pairs ("Popular" movies, "Popular" shows): say which
+    const named = (n) => views.filter((d) => (d.Name || "") === n).length;
+    return views
+      .map((d) => {
+        const kind = d.CollectionType === "tvshows" ? "show" : d.CollectionType === "movies" ? "movie" : "mixed";
+        let title = d.Name || "Library";
+        if (a && named(d.Name || "") > 1 && kind !== "mixed") title += kind === "show" ? " TV Shows" : " Movies";
+        const lib = { id: d.Id, type: "library", kind, title };
+        if (a) {
+          lib.genreRequired = !!(d.aiostreams && d.aiostreams.genreRequired);
+          const what = kind === "show" ? "TV shows" : kind === "mixed" ? "Movies and TV shows" : "Movies";
+          lib.desc = `${what} from your Stremio addons, ${lib.genreRequired ? "by genre" : "in the catalog's own order, or by genre"}.`;
+        }
+        return lib;
+      });
   }
 
   async function root(src) {
@@ -214,7 +257,8 @@
       ]);
       if ((started.Items || []).length || (next.Items || []).length) out.push({ id: "ondeck", type: "folder", title: "Continue Watching" });
     } catch { /* leave it out */ }
-    out.push({ id: "recent", type: "folder", title: "Recently Added" });
+    // (AIOStreams has no "recently added": its catalogs keep their own orders)
+    if (!aio(src)) out.push({ id: "recent", type: "folder", title: "Recently Added" });
     return out.concat(libs);
   }
 
@@ -230,6 +274,7 @@
   /** Continue Watching: what you've started (last watched first), then the
    *  next episode of shows you're watching. One entry per show. */
   async function onDeck(src) {
+    if (aio(src)) return onDeckAll(src);
     const q = (lib) => user(src, { parentId: lib.id, limit: 50, fields: FIELDS, enableImages: false });
     const [started, next] = await Promise.all([
       fromEach(src, async (lib) => items(await api(src, "/UserItems/Resume", Object.assign(q(lib), { mediaTypes: "Video" })))),
@@ -242,6 +287,25 @@
       if (seen.has(k)) continue;
       seen.add(k);
       out.push(item(m, { mixed: true, lib }));
+    }
+    return { items: out, total: out.length, next: null };
+  }
+
+  /** Continue Watching on AIOStreams: asked of everything at once (it has
+   *  nothing to say per library), so hidden libraries can't be left out. */
+  async function onDeckAll(src) {
+    const q = user(src, { limit: 50, fields: FIELDS, enableImages: false });
+    const [started, next] = await Promise.all([
+      api(src, "/UserItems/Resume", Object.assign({ mediaTypes: "Video" }, q)).then(items),
+      api(src, "/Shows/NextUp", q).then(items, () => []),
+    ]);
+    started.sort((a, b) => time((b.UserData || {}).LastPlayedDate) - time((a.UserData || {}).LastPlayedDate));
+    const seen = new Set(), out = [];
+    for (const m of started.concat(next)) {
+      const k = m.SeriesId || m.Id;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(item(m, { mixed: true }));
     }
     return { items: out, total: out.length, next: null };
   }
@@ -261,8 +325,14 @@
     { id: "unwatched", label: "Unwatched", q: { sortBy: "SortName", sortOrder: "Ascending", filters: "IsUnplayed" } },
     { id: "newest", label: "Newest", q: { sortBy: "PremiereDate,ProductionYear,SortName", sortOrder: "Descending,Descending,Ascending" } },
   ];
+  // AIOStreams: a catalog's own order is the only one (it ignores sortBy)
+  const AIO_ORDERS = [
+    { id: "all", label: "All", q: {} },
+    { id: "unwatched", label: "Unwatched", q: { filters: "IsUnplayed" } },
+  ];
   async function views(src, it) {
     if (it.type !== "library") return null;
+    if (aio(src)) return aioViews(src, it);
     let genres = [];
     try {
       const r = await api(src, "/Genres", user(src, { parentId: it.id, sortBy: "SortName", enableImages: false }));
@@ -271,13 +341,36 @@
     return ORDERS.concat(genres);
   }
 
-  /** A library's movies or shows. */
+  /** A catalog's orders and genres. One that only lists once a genre is
+   *  picked offers just its genres ("None" among them stands for all of it). */
+  async function aioViews(src, it) {
+    let genres = [];
+    try {
+      genres = items(await api(src, "/Genres", user(src, { parentId: it.id, enableImages: false })));
+    } catch (e) {
+      if (it.genreRequired) throw e;
+    }
+    const all = genres.find((g) => /^none$/i.test(g.Name || ""));
+    const named = genres.filter((g) => g !== all).map((g) => ({ id: "genre:" + g.Id, label: g.Name, q: { genreIds: g.Id } }));
+    if (!it.genreRequired) return AIO_ORDERS.concat(named);
+    if (all) return [{ id: "genre:" + all.Id, label: "All", q: { genreIds: all.Id } }].concat(named);
+    return named;
+  }
+
+  /** A library's movies or shows. (AIOStreams' catalogs say for themselves,
+   *  and may hold both.) */
   const libQuery = (src, lib, q) =>
-    user(src, Object.assign({ parentId: lib.id, includeItemTypes: lib.kind === "show" ? "Series" : "Movie", recursive: true }, q));
+    user(src, Object.assign({ parentId: lib.id, recursive: true },
+      aio(src) ? {} : { includeItemTypes: lib.kind === "show" ? "Series" : "Movie" }, q));
 
   async function list(src, it, view) {
     switch (it.type) {
-      case "library": return paged(src, "/Items", libQuery(src, it, (view || ORDERS[0]).q), { lib: it.id });
+      case "library": {
+        if (!aio(src)) return paged(src, "/Items", libQuery(src, it, (view || ORDERS[0]).q), { lib: it.id });
+        const v = view || (await aioViews(src, it))[0];
+        if (!v) return none(); // a catalog that needs a genre, with none to pick
+        return paged(src, "/Items", libQuery(src, it, v.q), { lib: it.id }, 0, true);
+      }
       case "folder": return it.id === "ondeck" ? onDeck(src) : recent(src);
       case "show": {
         // one season: straight to its episodes
@@ -293,7 +386,7 @@
   /** A library's titles matching what's typed (Jellyfin's own search). */
   async function search(src, it, query) {
     if (it.type !== "library") return none();
-    return paged(src, "/Items", libQuery(src, it, { searchTerm: query }), { lib: it.id }, 100);
+    return paged(src, "/Items", libQuery(src, it, { searchTerm: query }), { lib: it.id }, 100, aio(src));
   }
 
   /** Every episode of a show (all its seasons) or of a season. */
@@ -353,6 +446,7 @@
    * user, null: none) }
    */
   async function play(src, it, opts) {
+    if (aio(src)) return aioPlay(src, it, opts);
     const s = src.server, q = OnDemand.quality();
     const body = {
       UserId: s.userId, DeviceProfile: profile(q), MaxStreamingBitrate: q.kbps * 1000,
@@ -398,6 +492,147 @@
     return Object.assign(base, { method: "Transcode", url: t.href });
   }
 
+  // --------------------------------------------------- playing (AIOStreams)
+  /*
+   * A title's versions are its MediaSources, in AIOStreams' order (the
+   * user's sorting: cached files first, best quality...). They're files as
+   * they are, so whether one plays is up to this browser: the container and
+   * the codecs AIOStreams read from the file (or, before it has, from the
+   * release's name) are checked against what the browser says it can do.
+   */
+  const probe = document.createElement("video");
+  const can = (type) => { try { return !!probe.canPlayType(type); } catch { return false; } };
+  const CHROMIUM = /Chrom(e|ium)\//.test(UA) || /Edg\//.test(UA);
+  const CODECS = {
+    video: {
+      h264: ['video/mp4; codecs="avc1.640028"'], avc: ['video/mp4; codecs="avc1.640028"'],
+      hevc: ['video/mp4; codecs="hvc1.1.6.L120.90"', 'video/mp4; codecs="hev1.1.6.L120.90"'],
+      h265: ['video/mp4; codecs="hvc1.1.6.L120.90"', 'video/mp4; codecs="hev1.1.6.L120.90"'],
+      av1: ['video/mp4; codecs="av01.0.08M.08"'],
+      vp9: ['video/webm; codecs="vp9"'], vp8: ['video/webm; codecs="vp8"'],
+    },
+    audio: {
+      aac: ['audio/mp4; codecs="mp4a.40.2"'], mp3: ["audio/mpeg"], opus: ['audio/webm; codecs="opus"'],
+      vorbis: ['audio/webm; codecs="vorbis"'], flac: ['audio/mp4; codecs="flac"', "audio/flac"],
+      ac3: ['audio/mp4; codecs="ac-3"'], eac3: ['audio/mp4; codecs="ec-3"'],
+      dts: ['audio/mp4; codecs="dtsc"'], truehd: ['audio/mp4; codecs="mlpa"'],
+    },
+  };
+  /** true / false, or null for a codec nobody named. */
+  function codecOk(kind, name) {
+    const c = String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!c) return null;
+    const types = CODECS[kind][c];
+    return types ? types.some(can) : false;
+  }
+  /** A container this browser plays from a plain address: MP4 and WebM
+   *  everywhere; MKV in Chrome, Edge and Firefox (not Safari). */
+  function containerOk(c) {
+    const boxes = String(c || "").toLowerCase().split(",");
+    if (boxes.some((b) => /^(mp4|m4v|mov|webm)$/.test(b))) return true;
+    if (boxes.includes("mkv") || boxes.includes("matroska")) return can("video/x-matroska") || CHROMIUM || /Firefox\//.test(UA);
+    return false;
+  }
+  /** How likely a version is to play here: 2 sure, 1 can't tell, 0 won't. */
+  function fit(ms) {
+    if (!containerOk(ms.Container)) return 0;
+    const streams = ms.MediaStreams || [];
+    const v = streams.find((x) => x.Type === "Video");
+    const audio = streams.filter((x) => x.Type === "Audio");
+    const a = audio.find((x) => x.IsDefault) || audio[0];
+    const vOk = codecOk("video", v && v.Codec), aOk = codecOk("audio", a && a.Codec);
+    if (vOk === false || aOk === false) return 0;
+    // 10-bit or HDR H.264 doesn't decode in browsers
+    if (v && /h264|avc/i.test(v.Codec || "") && (v.BitDepth > 8 || /hdr|dolby|dovi/i.test(v.VideoRange || v.VideoRangeType || ""))) return 0;
+    return vOk && aOk ? 2 : 1;
+  }
+  /** A version's address on this site: AIOStreams' proxy (its links name
+   *  PUBLIC_URL; the page may have been opened at another address). Not
+   *  through the proxy: null, never played (the debrid service would see
+   *  this TV's address). */
+  function proxied(src, ms) {
+    let u;
+    try { u = new URL(ms.Path, src.server.uri); } catch { return null; }
+    if (!/^\/api\/v1\/proxy\//.test(u.pathname)) return null;
+    return new URL(u.pathname + u.search, src.server.uri).href;
+  }
+  /** "1080p · BluRay · HEVC · DD+ 5.1 · 12.3 GB · Cached" */
+  function versionTag(ms) {
+    const a = ms.aiostreams || {};
+    const gb = !a.size ? "" : a.size >= 1e9 ? `${(a.size / 1e9).toFixed(a.size >= 1e10 ? 0 : 1)} GB` : `${Math.max(1, Math.round(a.size / 1e6))} MB`;
+    return [a.resolution, a.quality, a.encode, (a.audioTags || []).slice(0, 2).join(" "), a.audioChannels && a.audioChannels[0], gb]
+      .filter((x) => x && x !== "Unknown").join(" · ");
+  }
+
+  /** The title's versions, asked of AIOStreams (it looks them up in every
+   *  stream addon and asks the debrid service what it has: that can take a
+   *  while). */
+  async function aioSources(src, it, versionId) {
+    const body = {
+      UserId: src.server.userId, IsPlayback: true, AutoOpenLiveStream: true,
+      // only the subtitle profiles are read: addons' subtitles come as WebVTT
+      DeviceProfile: { Name: PRODUCT, SubtitleProfiles: [{ Format: "vtt", Method: "External" }, { Format: "srt", Method: "External" }] },
+    };
+    if (versionId) body.MediaSourceId = versionId;
+    const info = await api(src, `/Items/${it.id}/PlaybackInfo`, {}, { method: "POST", body, timeout: 90000 });
+    const list = (info.MediaSources || []).filter((ms) => ms.Type !== "Placeholder" && ms.Path);
+    if (info.ErrorCode && !list.length) {
+      throw new Error(info.ErrorCode === "NoCompatibleStream"
+        ? "None of your Stremio addons found a stream for this. Check the addons and the debrid service in AIOStreams"
+        : `AIOStreams can't play this title (${info.ErrorCode})`);
+    }
+    if (!list.length) throw new Error("None of your Stremio addons found a stream for this");
+    return { info, list };
+  }
+
+  async function versions(src, it) {
+    const { list } = await aioSources(src, it);
+    return list.map((ms) => {
+      const a = ms.aiostreams || {}, ok = fit(ms), via = !!proxied(src, ms);
+      const note = !via ? "Not through this server's proxy: won't play" : ok === 0 ? "Probably won't play in this browser" : a.cached === false ? "Not cached: may take a while to start" : "";
+      return {
+        id: ms.Id,
+        label: a.name ? `${a.name.replace(/\s+/g, " ")}${a.filename ? ": " + a.filename : ""}` : ms.Name || a.filename || "Version",
+        tag: versionTag(ms) || (ok ? "" : "Won't play"),
+        warn: !via || ok === 0,
+        desc: [note, a.description ? a.description.replace(/\s+/g, " ") : a.filename].filter(Boolean).join(". "),
+      };
+    });
+  }
+
+  /** opts: { fromStart, at, version (a version's id from versions()) } */
+  async function aioPlay(src, it, opts) {
+    const s = src.server;
+    // (asked with fields, so AIOStreams doesn't look the streams up twice)
+    const [m, { info, list }] = await Promise.all([
+      api(src, `/Items/${it.id}`, user(src, { fields: FIELDS })).catch(() => ({})),
+      aioSources(src, it, opts.version),
+    ]);
+    const ours = list.filter((ms) => proxied(src, ms));
+    if (!ours.length) throw new Error("AIOStreams isn't sending its streams through this server, so they won't be played (your debrid service would see this TV's address). Check its proxy settings");
+    let ms = opts.version && ours.find((x) => x.Id === opts.version);
+    if (!ms) {
+      // AIOStreams' order, but the first this browser can surely play, then
+      // one it might, then (so there's still an error to see) the first
+      ms = ours.find((x) => fit(x) === 2) || ours.find((x) => fit(x) === 1) || ours[0];
+    }
+    const dur = (ms.RunTimeTicks || m.RunTimeTicks || 0) / TICKS || it.dur;
+    const start = opts.at != null ? opts.at : opts.fromStart ? 0 : ((m.UserData || {}).PlaybackPositionTicks || 0) / TICKS || it.offset || 0;
+    // subtitle files from addons (ones inside the video can't be fetched)
+    const origin = new URL(s.uri).origin;
+    const subs = (ms.MediaStreams || [])
+      .filter((x) => x.Type === "Subtitle" && (x.DeliveryMethod === "External" || x.IsExternal) && x.DeliveryUrl)
+      .map((x) => ({
+        id: x.Index, label: x.DisplayTitle || x.Language || "Subtitles", selected: x.Index === ms.DefaultSubtitleStreamIndex,
+        url: /^https?:/i.test(x.DeliveryUrl) ? x.DeliveryUrl
+          : x.DeliveryUrl.startsWith("/jellyfin/") ? origin + x.DeliveryUrl : s.uri.replace(/\/+$/, "") + x.DeliveryUrl,
+      }));
+    return {
+      url: proxied(src, ms), ours: true, start, dur, subs, burn: null,
+      method: "DirectPlay", session: info.PlaySessionId || "", source: ms.Id,
+    };
+  }
+
   const progress = (it, pl, sec) => ({
     ItemId: it.id, MediaSourceId: pl.source, PlaySessionId: pl.session,
     PositionTicks: Math.max(0, Math.round(sec * TICKS)),
@@ -421,10 +656,11 @@
   function signedIn(found, auth, opts) {
     if (!Dialog.is(opts)) return;
     const u = auth.User || {};
-    if (!auth.AccessToken || !u.Id) return Dialog.message("Jellyfin didn't sign in. Try again.", true);
-    const name = found.info.ServerName || "Jellyfin";
+    if (!auth.AccessToken || !u.Id) return Dialog.message(`${found.aio ? "AIOStreams" : "Jellyfin"} didn't sign in. Try again.`, true);
+    const type = found.aio ? "stremio" : "jellyfin";
+    const name = found.aio ? "Stremio" : found.info.ServerName || "Jellyfin";
     OnDemand.addSource({
-      id: `jellyfin:${found.info.Id}:${u.Id}`, type: "jellyfin", name, user: u.Name || "",
+      id: `${type}:${found.info.Id}:${u.Id}`, type, name, user: u.Name || "",
       server: { id: found.info.Id, uri: found.uri, token: auth.AccessToken, userId: u.Id },
     });
     Dialog.close();
@@ -458,10 +694,10 @@
     let alive = true, timer = 0;
     const stop = () => { alive = false; clearTimeout(timer); };
     const opts = {
-      title: `Sign In to ${found.info.ServerName || "Jellyfin"}`,
+      title: found.aio ? "Sign In to Stremio" : `Sign In to ${found.info.ServerName || "Jellyfin"}`,
       text: "Getting a code...",
       buttons: [
-        { label: "Sign In with Password Instead", act: () => { stop(); password(found); } },
+        { label: found.aio ? "Use UUID and Password Instead" : "Sign In with Password Instead", act: () => { stop(); password(found); } },
         { label: "Cancel", act: stop },
       ],
       onCancel: stop,
@@ -475,7 +711,9 @@
       secret = r.Secret;
       born = Date.now();
       if (!still()) return;
-      Dialog.message("In Jellyfin on your phone or computer, open your profile, choose Quick Connect, and enter this code:");
+      Dialog.message(found.aio
+        ? "On AIOStreams' setup page, open Save & Install, then Jellyfin apps, Connect, and enter this code under Quick Connect:"
+        : "In Jellyfin on your phone or computer, open your profile, choose Quick Connect, and enter this code:");
       Dialog.big(r.Code);
     };
     const poll = async () => {
@@ -506,21 +744,24 @@
   }
 
   function password(found) {
+    const a = found.aio;
     const opts = {
-      title: `Sign In to ${found.info.ServerName || "Jellyfin"}`,
-      text: "Your Jellyfin username and password.",
-      fields: [{ id: "user", label: "Username" }, { id: "pw", label: "Password", type: "password" }],
+      title: a ? "Sign In to Stremio" : `Sign In to ${found.info.ServerName || "Jellyfin"}`,
+      text: a
+        ? "Your AIOStreams setup's UUID (Save & Install shows it) and its password. A household user: UUID/name, and password/PIN if they have one."
+        : "Your Jellyfin username and password.",
+      fields: [{ id: "user", label: a ? "UUID" : "Username" }, { id: "pw", label: "Password", type: "password" }],
       buttons: [
         {
           label: "Sign In",
           act: async (v) => {
-            if (!v.user) { Dialog.message("Enter your username first.", true); return false; }
+            if (!v.user) { Dialog.message(a ? "Enter the UUID first." : "Enter your username first.", true); return false; }
             Dialog.message("Signing in...");
             let auth;
             try {
-              auth = await call(found.uri, "/Users/AuthenticateByName", { method: "POST", body: { Username: v.user, Pw: v.pw } });
+              auth = await call(found.uri, "/Users/AuthenticateByName", { method: "POST", body: { Username: v.user.trim(), Pw: v.pw } });
             } catch (e) {
-              Dialog.message(e.auth ? "Jellyfin didn't accept that username and password." : e.message, true);
+              Dialog.message(e.auth ? (a ? "AIOStreams didn't accept that UUID and password." : "Jellyfin didn't accept that username and password.") : e.message, true);
               return false;
             }
             signedIn(found, auth, opts);
@@ -534,7 +775,58 @@
     Dialog.open(opts);
   }
 
+  // ------------------------------------------------- sign in (AIOStreams)
+  /** AIOStreams' media server at an address: { uri, info, aio, qc }. */
+  async function findAio(uri) {
+    let info;
+    try { info = await call(uri, "/System/Info/Public", { timeout: 8000 }); } catch (e) {
+      throw new Error(`${e.message}. ${U.server.aiostreams && uri.startsWith(location.origin) ? "Is the aiostreams container running (docker compose ps)?" : "Check the address."}`);
+    }
+    if (!info || !info.aiostreams) throw new Error("That address answered, but it isn't AIOStreams.");
+    let qc = false;
+    try { qc = (await call(uri, "/QuickConnect/Enabled", { timeout: 8000 })) === true; } catch { /* password only */ }
+    return { uri, info, aio: true, qc };
+  }
+
+  /** Sign in to AIOStreams: the one on this server (docker-compose.yaml)
+   *  if there is one, else at an address you give. */
+  function stremioSignIn() {
+    const local = U.server.aiostreams ? location.origin + U.server.aiostreams : "";
+    const go = (how) => async (v) => {
+      let uri = local;
+      if (!uri) {
+        const t = (v.addr || "").trim();
+        if (!t) { Dialog.message("Enter AIOStreams' address first.", true); return false; }
+        try {
+          const u = new URL(/^https?:\/\//i.test(t) ? t : "https://" + t);
+          uri = u.origin + (u.pathname.replace(/\/+$/, "") || "/jellyfin");
+        } catch { Dialog.message("That doesn't look like an address.", true); return false; }
+        if (!reachable(uri)) { Dialog.message("This page was opened over https://, so it can't reach an http:// address.", true); return false; }
+      }
+      Dialog.message("Connecting...");
+      let found;
+      try { found = await findAio(uri); } catch (e) { Dialog.message(e.message, true); return false; }
+      return how === "qc" && found.qc ? quickConnect(found) : password(found);
+    };
+    Dialog.open({
+      title: "Sign In to Stremio",
+      text: local
+        ? "Movies and shows from your Stremio addons, from AIOStreams on this server. Set it up first on its own page (see the README), then sign in to it here."
+        : "AIOStreams' Jellyfin address, such as https://aiostreams.example.com/jellyfin. (Streams then come from that server, not this one.)",
+      fields: local ? [] : [{ id: "addr", label: "AIOStreams address", placeholder: "https://aiostreams.example.com/jellyfin" }],
+      buttons: [
+        { label: "Quick Connect", act: go("qc") },
+        { label: "UUID and Password", act: go("pw") },
+        { label: "Cancel" },
+      ],
+    });
+  }
+
   // ------------------------------------------------------------- provider
+  async function setWatched(src, it, on) {
+    await api(src, `/UserPlayedItems/${it.id}`, user(src), { method: on ? "POST" : "DELETE" });
+  }
+
   OnDemand.register("jellyfin", {
     label: "Jellyfin",
     setup: [
@@ -553,8 +845,26 @@
       release(src, pl, leaving);
       return send(src, "/Sessions/Playing/Stopped", progress(it, pl, sec), leaving);
     },
-    async setWatched(src, it, on) {
-      await api(src, `/UserPlayedItems/${it.id}`, user(src), { method: on ? "POST" : "DELETE" });
+    setWatched,
+  });
+
+  OnDemand.register("stremio", {
+    label: "Stremio",
+    setup: [
+      {
+        text: "Sign In to Stremio",
+        desc: "Movies and shows from your Stremio addons, streamed from your debrid service's cache through this server (AIOStreams). Set AIOStreams up first on its own page, then sign in with Quick Connect, or its UUID and password.",
+        act: stremioSignIn,
+      },
+    ],
+    describe(src) {
+      return `Stremio addons through AIOStreams${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
+    root, views, list, search, play, versions, episodes,
+    report,
+    stopped(src, it, pl, sec, leaving) {
+      return send(src, "/Sessions/Playing/Stopped", progress(it, pl, sec), leaving);
+    },
+    setWatched,
   });
 })();

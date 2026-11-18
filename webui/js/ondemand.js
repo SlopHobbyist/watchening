@@ -20,10 +20,13 @@
  *     views(src, item)         -> [{ id, label }] | null   a library's orders / genres (its menu)
  *     list(src, item, view)    -> { items, total, next() -> [item] | null }
  *     search(src, library, query) -> { items, total, next }   titles matching (optional)
- *     play(src, item, { fromStart, at, burn })
- *                              -> { url, start, dur, subs: [{ id, label, url, selected }], burn }
+ *     play(src, item, { fromStart, at, burn, version })
+ *                              -> { url, start, dur, subs: [{ id, label, url, selected }], burn, ours }
  *                                 (subs with a url are text files we show ourselves;
- *                                 the others are drawn into the picture: `burn`)
+ *                                 the others are drawn into the picture: `burn`;
+ *                                 ours: the url is this site's own stream proxy)
+ *     versions(src, item)  -> [{ id, label, tag, desc, warn }]   the files a title
+ *                                 can play from, best first (optional: Choose Version)
  *     report(src, item, play, state, sec)      "playing" | "paused", as it plays
  *     stopped(src, item, play, sec, leaving)   (leaving: the page is closing)
  *     release(src, play)                       let go of a stream (optional)
@@ -37,6 +40,7 @@
  *            watched, desc, hd, stars (0-5), show, season, episode, count,
  *            unwatched, seasons, aired ("2008-01-20"), cat (movie | kids | sports | ""),
  *            lib (the library it's in, in mixed lists), extra ("Trailer") }
+ *   (a library: kind movie | show | mixed, and desc to say what it is, optional)
  *
  * Libraries can be hidden (Settings, On Demand): Store.cfg.vod.hiddenLibs.
  * A show's seasons and a season's episodes start with Shuffle and Shuffle
@@ -87,8 +91,8 @@
   const viewKey = (src, it) => `${src.id}:${it.id}`;
   /** Whether a library (by id) is hidden from On Demand. */
   const libHidden = (src, id) => id != null && id !== "" && Store.cfg.vod.hiddenLibs.includes(`${src.id}:${id}`);
-  /** Titles get one wide button per row; menus two narrow ones. */
-  const isWide = (lv) => lv.rows.some((r) => r.item && playable(r.item));
+  /** Titles (and a title's versions) get one wide button per row; menus two narrow ones. */
+  const isWide = (lv) => !!lv.versions || lv.rows.some((r) => r.item && playable(r.item));
   const cols = (lv) => (isWide(lv) ? 1 : 2);
 
   // ------------------------------------------------------------ formatting
@@ -151,10 +155,10 @@
     const badges = App.badgeHtml(it.hd, it.rating);
     switch (it.type) {
       case "library": {
-        const what = it.kind === "show" ? "TV shows" : "Movies";
+        const what = it.kind === "show" ? "TV shows" : it.kind === "mixed" ? "Movies and TV shows" : "Movies";
         return {
-          title: it.title, chan: srcLabel(src), time: it.kind === "show" ? "TV Shows" : "Movies",
-          desc: `${what} on ${src.name}, from A to Z, newest first, or by genre.`,
+          title: it.title, chan: srcLabel(src), time: it.kind === "show" ? "TV Shows" : it.kind === "mixed" ? "Movies & TV" : "Movies",
+          desc: it.desc || `${what} on ${src.name}, from A to Z, newest first, or by genre.`,
         };
       }
       case "folder":
@@ -299,6 +303,15 @@
             lv.view = views[0] || null;
           }
         }
+        if (lv.versions) {
+          // a title's versions: the files it can play from
+          const it = lv.item;
+          rows = (await p.versions(lv.src, it)).map((v) => ({
+            text: v.label, tag: v.tag || "", warn: !!v.warn,
+            info: { title: it.type === "episode" && it.show ? it.show : it.title, chan: v.tag || "Version", desc: v.desc || v.label },
+            act: () => versionDialog(lv.src, it, v),
+          }));
+        }
         if (!rows && lv.query != null) {
           // search results: what the keyboard already found, unless it pages
           // (its pages were for the preview) or this is a reload
@@ -419,7 +432,8 @@
     for (const [el, t] of toFit) U.fitText(el, t, true);
 
     const msg = n ? "" : lv.loading ? "Loading..." : lv.error ? lv.error : lv.root ? "Nothing to show."
-      : lv.query != null ? `Nothing in ${lv.item.title} matches "${lv.query}".` : "Nothing here.";
+      : lv.query != null ? `Nothing in ${lv.item.title} matches "${lv.query}".`
+      : lv.versions ? "No versions of this title were found." : "Nothing here.";
     els.empty.textContent = msg;
     els.empty.classList.toggle("show", !!msg);
     els.more.classList.toggle("up", lv.top > 0);
@@ -645,6 +659,10 @@
         now ? { label: "Keep Watching", act: () => App.watch() }
           : resume ? { label: `Resume from ${U.fmtDur(it.offset)}`, act: start(false) } : { label: "Play", act: start(true) },
         (resume || now) && { label: "Play from Beginning", act: start(true) },
+        p.versions && {
+          label: "Choose Version",
+          act: () => push({ title: `${levelTitle(it)}: Versions`, src, item: it, versions: true }),
+        },
         it.type === "movie" && p.trailer && {
           label: "Play Trailer",
           act: async () => {
@@ -680,6 +698,29 @@
     });
   }
 
+  /** A version picked from a title's versions: play it, from where it was left. */
+  function versionDialog(src, it, v) {
+    const resume = hasResume(it);
+    const start = (fromStart) => async () => {
+      Dialog.message("Starting...");
+      try {
+        await play(src, it, { fromStart, version: v.id });
+      } catch (e) {
+        Dialog.message(e.message || String(e), true);
+        return false;
+      }
+    };
+    Dialog.open({
+      title: it.type === "episode" && it.show ? `${it.show}: ${it.title}` : it.title,
+      text: v.label,
+      buttons: [
+        resume ? { label: `Resume from ${U.fmtDur(it.offset)}`, act: start(false) } : { label: "Play", act: start(true) },
+        resume && { label: "Play from Beginning", act: start(true) },
+        { label: "Cancel" },
+      ].filter(Boolean),
+    });
+  }
+
   /** Play a random episode of a show or season (`unwatched`: of those not watched yet). */
   let shuffling = 0;
   async function shuffle(src, it, unwatched) {
@@ -707,7 +748,7 @@
       name: ep ? it.show : it.title,
       call: it.extra || (ep ? epCode(it) : it.year ? String(it.year) : srcLabel(src)),
       desc: itemInfo(src, it).desc,
-      subs: pl.subs || [], burn: pl.burn || null,
+      subs: pl.subs || [], burn: pl.burn || null, ours: !!pl.ours,
       src, item: it, play: pl,
     };
   }

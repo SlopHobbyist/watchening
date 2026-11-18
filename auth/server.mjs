@@ -506,7 +506,8 @@ const server = http.createServer(async (req, res) => {
         lastFileCheck = Date.now();
         checkLoginFile();
       }
-      return send(res, 200, { auth: AUTH, user, streamProxy: "/proxy/" });
+      // aiostreams: its media server for On Demand (docker-compose.yaml, nginx)
+      return send(res, 200, { auth: AUTH, user, streamProxy: "/proxy/", aiostreams: "/jellyfin" });
     }
 
     if (path === "/api/settings" || path.startsWith("/api/settings/")) return await settingsApi(req, res, path.slice("/api/settings".length));

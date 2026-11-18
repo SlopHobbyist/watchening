@@ -15,7 +15,7 @@
  *
  * On Demand titles (see ondemand.js) come in as channels with `vod` set:
  * `start` is where to begin (seconds) and `dur` the running time, used when
- * the stream doesn't say.
+ * the stream doesn't say; `ours`, a stream from this site's own proxy.
  *
  * The two playback libraries are fetched only when a stream needs them, from
  * jsDelivr, or from js/vendor/ if that fails (drop copies there for offline use).
@@ -348,7 +348,7 @@
     if (ch.embed) return startEmbed(ch, my);
     const url = await resolveUrl(ch.url);
     if (my !== P.token) return;
-    const plan = playPlan(url);
+    const plan = playPlan(url, ch.ours);
     const errs = [];
     let retried = false, skipDirect = false;
     for (let i = 0; i < plan.length; i++) {
@@ -391,9 +391,11 @@
    * Directly first, by its type's engines; then through the server's stream
    * proxy (MediaFlow), which reaches servers that don't allow web pages
    * (CORS), plays MPEG-DASH as HLS, and is the only way to an http:// stream
-   * from an https:// page.
+   * from an https:// page. `ours`: the stream already comes from this site
+   * (AIOStreams' proxy, see stremio in jellyfin.js), which MediaFlow can't
+   * fetch for us (it's behind the sign-in), so it's only played directly.
    */
-  function playPlan(url) {
+  function playPlan(url, ours) {
     const k = kind(url);
     let chain = CHAINS[k];
     // The <video> element isn't subject to CORS, so where the browser plays HLS
@@ -401,7 +403,7 @@
     // headers, or that redirect without them (jmp2.uk, many ad-stitched feeds).
     if (k === "hls" && video.canPlayType("application/vnd.apple.mpegurl")) chain = ["hls", "native"];
     const plan = U.mixed(url) ? [] : chain.map((how) => ({ how, src: url, proxied: false }));
-    if (U.server.proxy) {
+    if (U.server.proxy && !ours) {
       // the proxy's answers come from this site, so CORS is no problem and
       // native HLS has nothing to rescue
       const via = k === "dash" ? ["hls"] : k === "hls" ? ["hls"] : CHAINS[k];

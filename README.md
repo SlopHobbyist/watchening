@@ -55,6 +55,32 @@ Saved settings, groups and uploaded playlists are kept in `data/settings/`.
 Putting it on the internet behind a reverse proxy: see
 [docs/REMINDERS.md](docs/REMINDERS.md).
 
+### Stremio addons and debrid
+
+On Demand can also play from Stremio addons with a debrid service (Real-Debrid,
+TorBox, AllDebrid, Premiumize...), the way Stremio does, through
+[AIOStreams](https://github.com/Viren070/AIOStreams), which runs alongside:
+
+1. Optionally put your debrid service and API key in `.env` (`DEBRID_SERVICE`,
+   `DEBRID_API_KEY`), then `docker compose up -d`.
+2. On the server, open <http://localhost:3001/stremio/configure> and sign in
+   with `data/aiostreams-login.txt`. Add your debrid service (already filled
+   in if it's in `.env`), a catalog addon such as Cinemeta (what you browse
+   and search) and one or more stream addons (Torrentio, Comet...), then
+   **Save & Install**. Note the UUID and the password you chose.
+3. In Watchening: **Settings > On Demand > Sign In to Stremio**, with that UUID
+   and password (or Quick Connect: approve the code under **Save & Install >
+   Jellyfin apps > Connect** on that page).
+
+Catalogs and their genres show up as libraries, with Search. A title is
+looked up in every stream addon, the debrid service says which files it
+already has, and the best one the browser can play starts. Every stream
+comes through this server (AIOStreams' own proxy), so the debrid service only
+ever sees the server's address, however many people watch at once. Files are
+played as they are, never converted: MP4 and MKV with H.264 play everywhere,
+HEVC, Dolby Vision, DTS and TrueHD often don't in a browser, so On Demand
+prefers versions that will.
+
 ## Licenses
 
 Watchening is licensed under the [GNU GPL v3](LICENSE.txt).
@@ -75,12 +101,13 @@ It's built on these projects, each under its own license:
 | [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | Voice search server | MIT |
 | [FUTO voice input models](https://keyboard.futo.tech/voice-input-models) ([whisper-acft](https://github.com/futo-org/whisper-acft)) | Voice search models, downloaded on first start | Apache-2.0 (models), MIT (training code) |
 | [OpenAI Whisper](https://github.com/openai/whisper) | The model FUTO's are fine-tuned from | MIT |
+| [AIOStreams](https://github.com/Viren070/AIOStreams) | Stremio addons, debrid services and their stream proxy, for On Demand | AGPL-3.0 |
 
 The Comcast and TV Guide logos and the channel logos in `webui/assets/` are
 trademarks of their owners. They're used here only to identify the channels,
 and Watchening isn't affiliated with or endorsed by any of them. The same goes
-for Plex, Jellyfin and zlive.st, which Watchening connects to but doesn't
-include.
+for Plex, Jellyfin, Stremio, zlive.st and the debrid services, which
+Watchening connects to but doesn't include.
 
 > [!NOTE]
-> Watchening doesn't host, provide or distribute any TV channels, shows or movies. It's only a player: everything it plays comes from sources you set up yourself, such as your own IPTV playlists or your Plex or Jellyfin servers. Watchening doesn't run or control any of those sources. Make sure you have the right to watch what you play.
+> Watchening doesn't host, provide or distribute any TV channels, shows or movies. It's only a player: everything it plays comes from sources you set up yourself, such as your own IPTV playlists, your Plex or Jellyfin servers, or the Stremio addons and debrid account you set up in AIOStreams. Watchening doesn't run or control any of those sources. Make sure you have the right to watch what you play.

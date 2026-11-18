@@ -21,8 +21,11 @@
 #              streams whose servers don't allow web pages
 #   speech     voice search: whisper.cpp with FUTO's voice input models, on
 #              the CPU (no GPU needed)
+#   aiostreams AIOStreams: Stremio addons and a debrid service, for On Demand,
+#              with every stream relayed through this server
 #
-# Only webui is published on a port. Each browser keeps its own playlists and
+# Only webui is published on a port (and AIOStreams' setup page, on this
+# machine only: see AIOSTREAMS_PORT). Each browser keeps its own playlists and
 # settings; accounts only decide who can open the site.
 
 name: watchening
@@ -95,6 +98,9 @@ services:
     command: ["node", "/app/setup.mjs"]
     environment:
       PUBLIC_URL: "${PUBLIC_URL:-}"
+      DEBRID_SERVICE: "${DEBRID_SERVICE:-}"
+      DEBRID_API_KEY: "${DEBRID_API_KEY:-}"
+      AIOSTREAMS_PORT: "${AIOSTREAMS_PORT:-127.0.0.1:3001}"
     volumes:
       - ./auth:/app:ro
       - auth-secrets:/secrets
@@ -221,9 +227,54 @@ services:
       start_interval: 2s
     <<: *logging
 
+  # Stremio addons for On Demand: AIOStreams (github.com/Viren070/AIOStreams)
+  # gathers catalogs (Cinemeta and others) and streams from the addons you
+  # pick, asks your debrid service which files it already has (its cache),
+  # and offers it all as a media server that speaks Jellyfin's language, at
+  # /jellyfin on this site (nginx; signed in). On Demand adds it under
+  # Settings, On Demand, "Sign In to Stremio".
+  #
+  # Every stream it hands out goes through its own proxy, at /api/v1/proxy/
+  # on this site: the debrid service sends the file here and only ever sees
+  # this server's address, so the whole household can watch at once without
+  # it looking like the account is shared. Files are played as they are
+  # (never converted): a browser plays MP4 and most MKV with H.264; HEVC,
+  # DTS or TrueHD often won't, so pick another version when one doesn't.
+  #
+  # Set it up on its own page, from this machine: http://localhost:3001/stremio/configure
+  # (AIOSTREAMS_PORT; sign in with data/aiostreams-login.txt). Its address,
+  # keys and proxy come from .env through setup (aiostreams.env).
+  aiostreams:
+    image: ghcr.io/viren070/aiostreams:v2.38.1
+    container_name: watchening-aiostreams
+    restart: unless-stopped
+    # (the image has no shell of its own beyond busybox sh: enough to load the file setup wrote)
+    entrypoint: ["/bin/sh", "-c", "set -a; . /etc/aiostreams.env; exec /nodejs/bin/node /app/packages/server/dist/server.js"]
+    environment:
+      # unused by AIOStreams (it reads aiostreams.env): changing these in .env
+      # makes compose restart this, to load what setup wrote for them
+      PUBLIC_URL: "${PUBLIC_URL:-}"
+      DEBRID_SERVICE: "${DEBRID_SERVICE:-}"
+    ports:
+      # its setup page; keep it off the internet
+      - "${AIOSTREAMS_PORT:-127.0.0.1:3001}:3000"
+    volumes:
+      - aiostreams-data:/app/data
+      - type: volume
+        source: auth-secrets
+        target: /etc/aiostreams.env
+        read_only: true
+        volume:
+          subpath: aiostreams.env
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    <<: *logging
+
 volumes:
   epg:           # the finished guide, shared with nginx
   epg-work:      # last run's listings and which sites have been failing
-  auth-secrets:  # made on the first start: Kratos's keys, MediaFlow's password
+  auth-secrets:  # made on the first start: Kratos's keys, MediaFlow's and AIOStreams' passwords
   kratos-db:     # accounts (SQLite)
   speech-models: # FUTO's voice input model, downloaded on the first start
+  aiostreams-data: # AIOStreams' setups (SQLite) and caches
