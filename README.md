@@ -121,7 +121,7 @@ It's built on these projects, each under its own license:
 The Comcast and TV Guide logos and the channel logos in `webui/assets/` are
 trademarks of their owners. They're used here only to identify the channels,
 and Watchening isn't affiliated with or endorsed by any of them. The same goes
-for Plex, Jellyfin, Stremio, zlive.st and the debrid services, which
+for Plex, Jellyfin, Stremio, zlive and the debrid services, which
 Watchening connects to but doesn't include.
 
 > [!NOTE]

@@ -3,7 +3,7 @@
  * left (like the guide's channel column) beside that category's rows, an
  * info panel describing the selection, and key hints.
  *
- *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
+ *   Playlists  add by URL / upload file, zlive channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
  *   On Demand  sign in to Plex (or add a server by address) or Jellyfin, servers (and their
@@ -42,14 +42,15 @@
     const pl = App.zlive();
     const on = !!(pl && pl.enabled);
     return {
-      text: "zlive.st Channels",
+      text: "zlive Channels",
       tag: !on ? "Off" : pl.error ? "Problem" : `${pl.count || 0} ch · On`,
       cls: (on ? "" : "off") + (on && pl.error ? " warn" : ""),
       info: {
-        title: "zlive.st Channels",
+        title: "zlive Channels",
         chan: on ? `${pl.count || 0} channels` : "Off",
         desc: [
-          "Live TV and sports channels from zlive.st, added to your guide. They play in zlive's own player, so pause, rewind and subtitles aren't available on them",
+          on ? `Live TV and sports channels from ${zliveSite(pl)}, added to your guide. They play in the site's own player, so pause, rewind and subtitles aren't available on them`
+            : "Live TV and sports channels from a site whose address you enter, added to your guide. They play in the site's own player, so pause, rewind and subtitles aren't available on them",
           on && pl.updated ? "Updated " + U.fmtDate(pl.updated) : "",
           on && pl.error ? `Problem: ${pl.error}` : "",
         ].filter(Boolean).join(". ") + ".",
@@ -179,7 +180,7 @@
       },
       {
         text: "Channel Icons", tag: p.chanIcons !== false ? "On" : "Off",
-        info: { title: "Channel Icons", desc: "Show a built-in icon, picked by channel name, for channels whose playlist has none (zlive.st channels never do). The icons are the ones the channels used around 2005." },
+        info: { title: "Channel Icons", desc: "Show a built-in icon, picked by channel name, for channels whose playlist has none (zlive channels never do). The icons are the ones the channels used around 2005." },
         act: () => { App.setPrefs({ chanIcons: p.chanIcons === false }); App.rebuild(); render(); },
       },
       {
@@ -577,43 +578,66 @@
     });
   }
 
+  /** The site part of a saved zlive playlist's address, for showing and editing. */
+  function zliveSite(pl) { try { return new URL(pl.url).host; } catch { return ""; } }
+
+  /** Ask for the site's address (nothing is filled in out of the box), then
+   *  download its channel list and turn the channels on. */
+  function zliveAddressDialog() {
+    const pl = App.zlive();
+    Dialog.open({
+      title: "zlive Channels",
+      text: "Enter the address of the site to load live TV and sports channels from. They play in the site's own player: pause, rewind and subtitles aren't available on them.",
+      fields: [{
+        id: "url", label: "Site address", placeholder: "example.com",
+        // the short form when it's the usual list, so it reads as what was typed
+        value: !pl ? "" : /^https:\/\/[^/]+\/embed\/manifest\.json$/.test(pl.url) ? zliveSite(pl) : pl.url,
+      }],
+      buttons: [
+        {
+          label: "Turn On",
+          act: async (v) => {
+            if (!v.url) { Dialog.message("Enter the site's address first.", true); return false; }
+            Dialog.message("Downloading the channel list...");
+            try {
+              const p = await App.setZlive(true, v.url);
+              App.osd(`zlive: ${p.count} channels`, 3500);
+              if (!Player.ch && App.channels.length) App.tuneKey(App.channels[0].key);
+              render();
+            } catch (e) {
+              Dialog.message(e.message, true);
+              return false;
+            }
+          },
+        },
+        { label: "Cancel" },
+      ],
+    });
+  }
+
   function zliveDialog() {
     const pl = App.zlive();
     const on = !!(pl && pl.enabled);
-    const turnOn = async () => {
-      Dialog.message("Downloading zlive's channel list...");
-      try {
-        const p = await App.setZlive(true);
-        App.osd(`zlive.st: ${p.count} channels`, 3500);
-        if (!Player.ch && App.channels.length) App.tuneKey(App.channels[0].key);
-        render();
-      } catch (e) {
-        Dialog.message(e.message, true);
-        return false;
-      }
-    };
+    if (!on) return zliveAddressDialog();
     Dialog.open({
-      title: "zlive.st Channels",
-      text: on
-        ? (pl.error ? `Problem: ${pl.error}\n` : "") + `${pl.count || 0} channels in your guide.`
-        : "Add zlive.st's free live TV and sports channels to your guide. They play in zlive's own player: pause, rewind and subtitles aren't available on them.",
-      buttons: on
-        ? [
-          {
-            label: "Download Again Now",
-            act: async () => {
-              Dialog.message("Downloading...");
-              await App.loadPlaylist(pl, true);
-              Store.save();
-              App.rebuild();
-              if (pl.error) { Dialog.message(pl.error, true); return false; }
-              App.osd(`zlive.st: ${pl.count} channels`);
-            },
+      title: "zlive Channels",
+      text: (pl.error ? `Problem: ${pl.error}\n` : "") + `${pl.count || 0} channels in your guide, from ${zliveSite(pl)}.`,
+      buttons: [
+        {
+          label: "Download Again Now",
+          act: async () => {
+            Dialog.message("Downloading...");
+            await App.loadPlaylist(pl, true);
+            Store.save();
+            App.rebuild();
+            if (pl.error) { Dialog.message(pl.error, true); return false; }
+            App.osd(`zlive: ${pl.count} channels`);
           },
-          { label: "Turn Off", act: () => { App.setZlive(false); render(); } },
-          { label: "Cancel" },
-        ]
-        : [{ label: "Turn On", act: turnOn }, { label: "Cancel" }],
+        },
+        { label: "Change Address", act: () => zliveAddressDialog() },
+        { label: "Turn Off", act: () => { App.setZlive(false); render(); } },
+        { label: "Cancel" },
+      ],
     });
   }
 

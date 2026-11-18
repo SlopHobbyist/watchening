@@ -1528,12 +1528,13 @@
   /** Read (and with `refresh`, re-download) one playlist into App.data. */
   App.loadPlaylist = async function (pl, refresh) {
     const zl = pl.type === "zlive";
+    if (zl) pl.name = "zlive"; // older versions saved the site's full address as its name
     let text = null;
     if (isWeb(pl) && refresh) {
       try {
         // zlive's list is open to web pages, so it never needs the proxy
         const got = await U.fetchText(pl.url, zl ? "" : Store.cfg.prefs.proxy);
-        if (zl) Zlive.parse(got); // keep the saved copy if this one is broken
+        if (zl) Zlive.parse(got, pl.url); // keep the saved copy if this one is broken
         text = got;
         await Store.put("pl:" + pl.id, text);
         pl.updated = Date.now();
@@ -1550,7 +1551,7 @@
     }
     let parsed;
     if (zl) {
-      try { parsed = Zlive.parse(text); } catch (e) { pl.error = e.message; App.data.delete(pl.id); return null; }
+      try { parsed = Zlive.parse(text, pl.url); } catch (e) { pl.error = e.message; App.data.delete(pl.id); return null; }
     } else parsed = M3U.parse(text, pl.type === "url" ? pl.url : "");
     if (parsed.isStream) {
       // a single HLS stream added by URL: treat it as a one-channel playlist
@@ -1624,19 +1625,29 @@
   /** The zlive channel source (a playlist of type "zlive"), if ever turned on. */
   App.zlive = () => Store.cfg.playlists.find((p) => p.type === "zlive") || null;
 
-  /** Turn zlive's channels on (downloading its list) or off. Turning off
-   *  keeps the list, channel order and hidden channels for next time. */
-  App.setZlive = async function (on) {
+  /** Turn zlive's channels on (downloading its list from `address`, the site
+   *  the user typed in) or off. Turning off keeps the list, channel order and
+   *  hidden channels for next time. */
+  App.setZlive = async function (on, address) {
     let pl = App.zlive();
+    const url = on ? Zlive.manifestUrl(address || (pl && pl.url)) : "";
     if (!on) {
       if (pl) pl.enabled = false;
     } else if (pl) {
+      const prev = pl.url, moved = url !== prev;
+      pl.url = url;
       pl.enabled = true;
-      if (!App.data.has(pl.id) || !pl.updated || Date.now() - pl.updated > 3600e3) await App.loadPlaylist(pl, true);
-      if (!App.data.has(pl.id)) { pl.enabled = false; throw new Error(pl.error || "Couldn't download zlive's channel list"); }
+      if (moved || !App.data.has(pl.id) || !pl.updated || Date.now() - pl.updated > 3600e3) await App.loadPlaylist(pl, true);
+      if (!App.data.has(pl.id) || (moved && pl.error)) {
+        const err = pl.error;
+        // a new address that didn't work: keep the old one and its saved list
+        if (moved) { pl.url = prev; await App.loadPlaylist(pl, false); }
+        pl.enabled = false;
+        throw new Error(err || "Couldn't download zlive's channel list");
+      }
     } else {
       pl = {
-        id: "zlive", name: "zlive.st", type: "zlive", url: Zlive.MANIFEST,
+        id: "zlive", name: "zlive", type: "zlive", url,
         enabled: true, count: 0, updated: 0, error: "",
       };
       await App.loadPlaylist(pl, true);

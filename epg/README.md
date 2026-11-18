@@ -1,8 +1,12 @@
 # zlive guide builder
 
-The `epg` service in `docker-compose.yaml` builds guide listings for zlive.st's
+The `epg` service in `docker-compose.yaml` builds guide listings for zlive's
 channels. nginx serves the result at `/epg/zlive.xml.gz`, and the web UI's
 zlive playlist loads it the same way an M3U's `url-tvg` is loaded.
+
+No site address ships with Watchening. Set `ZLIVE_URL` in `.env` to the same
+address you typed into the web UI (Settings, Playlists, "zlive Channels");
+until then the service starts, logs that it has nothing to do, and waits.
 
 It runs in [iptv-org/epg](https://github.com/iptv-org/epg)'s own Docker image,
 which includes iptv-org's channel database, their scrapers for about 250 guide
@@ -13,7 +17,7 @@ every change, so `docker compose pull` picks up their fixes.
 
 `zlive-epg.mjs` runs at start-up and then every `EPG_EVERY_HOURS`:
 
-1. It downloads zlive's channel list.
+1. It downloads the channel list from `ZLIVE_URL`.
 2. `match.mjs` matches each zlive channel to an iptv-org channel by name, alt
    name, and the country in the name ("Cartoon Network UK"). Listings only
    come from site entries that iptv-org has mapped to that channel.

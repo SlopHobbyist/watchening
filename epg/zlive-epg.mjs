@@ -1,5 +1,5 @@
 /*
- * Builds the guide for zlive.st's channels, on a schedule.
+ * Builds the guide for zlive's channels, on a schedule.
  *
  * Runs inside iptv-org's EPG image (ghcr.io/iptv-org/epg), which carries
  * their grabber, the scrapers for each guide site and the channel database.
@@ -17,20 +17,23 @@
  *   EPG_EVERY_HOURS     hours between runs (default 12)
  *   EPG_MAX_CONNECTIONS requests at once (default 5)
  *   EPG_TRIES           sites tried per channel per run (default 3)
- *   ZLIVE_MANIFEST      zlive's channel list (a URL, or a file path)
+ *   ZLIVE_URL           the site to build the guide for (the same address
+ *                       typed into the web UI), its manifest's address, or a
+ *                       file path. Nothing ships by default: with none set,
+ *                       this does nothing.
  *   EPG_ONCE            set to run once and exit
  */
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import { spawn } from "node:child_process";
-import { match } from "./match.mjs";
+import { match, manifestUrl } from "./match.mjs";
 
 const EPG = process.env.EPG_DIR || "/epg";
 const OUT = process.env.OUT_DIR || "/out";
 const WORK = process.env.WORK_DIR || "/work";
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const MANIFEST = process.env.ZLIVE_MANIFEST || "https://zlive.st/embed/manifest.json";
+const MANIFEST = manifestUrl(process.env.ZLIVE_URL);
 const DAYS = num(process.env.EPG_DAYS, 3);
 const EVERY = num(process.env.EPG_EVERY_HOURS, 12) * 3600e3;
 const CONNECTIONS = num(process.env.EPG_MAX_CONNECTIONS, 5);
@@ -74,12 +77,20 @@ function writeAtomic(file, data) {
 const xmlAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const srcKey = (s) => `${s.site}|${s.site_id}|${s.lang}`;
 
-const { EPGGrabber, Channel, Program } = await import(path.join(EPG, "node_modules/epg-grabber/dist/index.js"));
-
 let child = null;
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => { if (child) child.kill("SIGTERM"); process.exit(0); });
 }
+
+if (!MANIFEST) {
+  // Stay up doing nothing (rather than exit and be restarted over and over).
+  log("ZLIVE_URL isn't set in .env, so there's no guide to build. Set it and run: docker compose up -d");
+  if (process.env.EPG_ONCE) process.exit(0);
+  setInterval(() => {}, 2 ** 31 - 1);
+  await new Promise(() => {});
+}
+
+const { EPGGrabber, Channel, Program } = await import(path.join(EPG, "node_modules/epg-grabber/dist/index.js"));
 
 async function manifest() {
   const saved = path.join(WORK, "manifest.json");

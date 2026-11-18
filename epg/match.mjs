@@ -1,5 +1,5 @@
 /*
- * Matches zlive.st channels to guide sources, using iptv-org's own data.
+ * Matches zlive channels to guide sources, using iptv-org's own data.
  *
  * Everything comes from the iptv-org/epg image this runs in, which iptv-org
  * rebuilds on every change:
@@ -22,9 +22,9 @@
  *                   site from that country, main feed, site status],
  *            each 0 = better
  *
- * Run it directly to print a report (defaults: zlive's live channel list and
- * the overrides.json beside this file):
- *   node match.mjs [manifest.json|URL] [overrides.json]
+ * Run it directly to print a report (defaults: the site in ZLIVE_URL and the
+ * overrides.json beside this file):
+ *   node match.mjs [site address|manifest.json|URL] [overrides.json]
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -32,6 +32,17 @@ import { pathToFileURL } from "node:url";
 
 const EPG = process.env.EPG_DIR || "/epg";
 const DATA = path.join(EPG, "temp/data");
+
+/** A site address ("example.com", "https://example.com"), a manifest's own
+ *  address, or a file path -> where to read the manifest; "" for nothing.
+ *  The same rule as the web UI's Zlive.manifestUrl. */
+export function manifestUrl(input) {
+  let s = String(input || "").trim();
+  if (!s || s.startsWith("/")) return s;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = "https://" + s;
+  const u = new URL(s);
+  return /\.json$/i.test(u.pathname) ? u.href : new URL("/embed/manifest.json", u.origin).href;
+}
 
 /** Lowercase letters and digits. fold also counts "sports" as "sport". */
 export function norm(s, fold) {
@@ -345,7 +356,8 @@ export function match(manifest, overrides = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const src = process.argv[2] || "https://zlive.st/embed/manifest.json";
+  const src = manifestUrl(process.argv[2] || process.env.ZLIVE_URL);
+  if (!src) { console.error("usage: node match.mjs <site address|manifest.json|URL> [overrides.json]  (or set ZLIVE_URL)"); process.exit(2); }
   const manifest = /^https?:/.test(src) ? await (await fetch(src)).json() : JSON.parse(fs.readFileSync(src, "utf8"));
   const ovFile = process.argv[3] || path.join(path.dirname(new URL(import.meta.url).pathname), "overrides.json");
   const overrides = fs.existsSync(ovFile) ? JSON.parse(fs.readFileSync(ovFile, "utf8")) : {};

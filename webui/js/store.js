@@ -8,7 +8,7 @@
  *
  * cfg = {
  *   playlists: [{ id, name, type: "url"|"file"|"zlive", url, enabled, count, updated, error, file }],
- *              (at most one "zlive": zlive.st's channels, see zlive.js;
+ *              (at most one "zlive": zlive's channels, see zlive.js;
  *               file: an uploaded playlist's copy on the server, see sync.js)
  *   order:  [channel keys]   custom channel order (keys: "<playlist id>|<stream url>")
  *   hidden: [channel keys]

@@ -1,4 +1,4 @@
-# Watchening: the web UI, a guide builder for zlive.st's channels, sign-in,
+# Watchening: the web UI, a guide builder for zlive's channels, sign-in,
 # and a stream proxy.
 #
 #   docker compose up -d            -> http://localhost:8080
@@ -12,7 +12,7 @@
 #
 # What runs:
 #   webui      nginx: the app, and the door to everything below
-#   epg        builds guide listings for zlive.st's channels
+#   epg        builds guide listings for zlive's channels
 #   setup      (runs and exits) makes the secrets, writes config from .env
 #   kratos     Ory Kratos: accounts and sign-in (kratos-migrate prepares its database)
 #   accounts   our small service between nginx and Kratos: checks sign-ins,
@@ -67,18 +67,20 @@ services:
       retries: 3
     <<: *logging
 
-  # Guide listings for zlive.st's channels, served at /epg/zlive.xml.gz
+  # Guide listings for zlive's channels, served at /epg/zlive.xml.gz
   # (the zlive playlist loads it by itself) with a report at /epg/status.json.
   # It runs iptv-org's EPG grabber (github.com/iptv-org/epg) in their own
   # image; ./epg matches zlive's channels to their channel database and
   # picks each channel's best working guide site. The first guide appears a
   # few minutes after start-up, then it's rebuilt every EPG_EVERY_HOURS.
+  # It does nothing until ZLIVE_URL is set in .env (no site ships by default).
   epg:
     image: ghcr.io/iptv-org/epg:master
     container_name: watchening-epg
     restart: unless-stopped
     entrypoint: ["node", "/zlive/zlive-epg.mjs"]
     environment:
+      ZLIVE_URL: "${ZLIVE_URL:-}"                # the site typed into Settings, Playlists
       EPG_DAYS: "${EPG_DAYS:-3}"                 # days of listings to fetch
       EPG_EVERY_HOURS: "${EPG_EVERY_HOURS:-12}"  # hours between rebuilds
       EPG_MAX_CONNECTIONS: "${EPG_MAX_CONNECTIONS:-5}"
