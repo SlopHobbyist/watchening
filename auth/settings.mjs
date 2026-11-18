@@ -15,7 +15,9 @@
  *                     group and its people share one copy
  *
  * cfg is the app's settings (Store.cfg in webui/js/store.js) without what
- * belongs to one TV; see webui/js/sync.js. Uploaded playlists name their
+ * belongs to one TV; see webui/js/sync.js. A few options are the person's
+ * own (PERSONAL): a group's settings never carry them, and a group update
+ * leaves each person's as they were. Uploaded playlists name their
  * file in pl.file. rev goes up with every save: a save based on an older rev
  * is refused (another TV saved first), and the TV takes the newer copy.
  */
@@ -29,6 +31,27 @@ const FILES = path.join(DIR, "files");
 const GROUPS = path.join(DIR, "groups.json");
 const ID = /^([0-9a-f-]{36}|home)$/i;
 export const FILE_ID = /^[0-9a-f]{64}$/;
+
+/** Options that belong to the person, not their group (cfg.prefs keys; the
+ *  same list as Store.PERSONAL in webui/js/store.js). */
+const PERSONAL = ["ccDefault"];
+
+/** `cfg` without the person's own options: what a group keeps. */
+function forGroup(cfg) {
+  if (!cfg || !cfg.prefs || typeof cfg.prefs !== "object") return cfg;
+  const prefs = { ...cfg.prefs };
+  for (const k of PERSONAL) delete prefs[k];
+  return { ...cfg, prefs };
+}
+/** A group's `cfg` with the person's own options from `mine` (their old settings). */
+function withPersonal(cfg, mine) {
+  const prefs = { ...((cfg && cfg.prefs) || {}) };
+  for (const k of PERSONAL) {
+    delete prefs[k];
+    if (mine && mine.prefs && mine.prefs[k] !== undefined) prefs[k] = mine.prefs[k];
+  }
+  return { ...cfg, prefs };
+}
 
 export function init() {
   for (const d of [PEOPLE, FILES]) fs.mkdirSync(d, { recursive: true });
@@ -73,7 +96,7 @@ export function forPerson(id, groupId) {
   let doc = person(id);
   const g = groupId ? group(groupId) : null;
   if (g && g.cfg && doc.groupRev !== g.rev) {
-    doc = { rev: doc.rev + 1, updated: new Date().toISOString(), cfg: g.cfg, groupRev: g.rev, fromGroup: true };
+    doc = { rev: doc.rev + 1, updated: new Date().toISOString(), cfg: withPersonal(g.cfg, doc.cfg), groupRev: g.rev, fromGroup: true };
     write(personFile(id), doc);
   }
   return { doc, group: g };
@@ -115,7 +138,7 @@ export function setGroupSettings(id, cfg, by, baseRev) {
   let stale = false;
   const g = changeGroup(id, (x) => {
     if (baseRev !== undefined && baseRev !== x.rev) { stale = true; return; }
-    Object.assign(x, { cfg, rev: x.rev + 1, updated: new Date().toISOString(), by });
+    Object.assign(x, { cfg: forGroup(cfg), rev: x.rev + 1, updated: new Date().toISOString(), by });
   });
   return g && !stale ? g : null;
 }

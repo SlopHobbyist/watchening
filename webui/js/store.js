@@ -23,9 +23,13 @@
  *           hiddenLibs: ["<source id>:<library id>"] (left out of On Demand) }
  * }
  *
+ * Some options are the person's own (PERSONAL): saved to their account, but
+ * never part of a group's settings (auth/settings.mjs keeps them out).
+ *
  * Editing a group's settings (/?group=<id>, admins; see sync.js): cfg holds the
- * group's settings, and only this TV's own parts (DEVICE) are kept in
- * localStorage, so the admin's own settings stay as they were.
+ * group's settings, and only this TV's own parts (DEVICE) and the admin's own
+ * options (PERSONAL) are kept in localStorage, so the admin's own settings
+ * stay as they were.
  */
 (function () {
   "use strict";
@@ -44,7 +48,13 @@
   /** What belongs to this TV, not to the person: the screen's shape and
    *  picture settings, the last channel, the id media servers know it by. */
   const DEVICE = { top: ["last", "screen", "screenCh"], prefs: ["squish", "wide"], vod: ["clientId"] };
+  /** Options that are the person's, not their group's (prefs keys; the same
+   *  list as PERSONAL in auth/settings.mjs). */
+  const PERSONAL = ["ccDefault"];
   const editing = new URLSearchParams(location.search).get("group") || "";
+  /** What stays in this browser rather than in the settings being saved:
+   *  this TV's parts, and while editing a group, the admin's own options too. */
+  const LOCAL = editing ? Object.assign({}, DEVICE, { prefs: DEVICE.prefs.concat(PERSONAL) }) : DEVICE;
 
   /** A saved cfg (from storage or the server) made whole. */
   function normalize(saved) {
@@ -57,17 +67,17 @@
     }
     return cfg;
   }
-  /** The parts of `cfg` that belong to this TV. */
+  /** The parts of `cfg` that stay in this browser (LOCAL). */
   function deviceParts(cfg) {
     const out = { prefs: {}, vod: {} };
-    for (const k of DEVICE.top) if (cfg[k] !== undefined) out[k] = cfg[k];
-    for (const k of DEVICE.prefs) if (cfg.prefs && cfg.prefs[k] !== undefined) out.prefs[k] = cfg.prefs[k];
-    for (const k of DEVICE.vod) if (cfg.vod && cfg.vod[k] !== undefined) out.vod[k] = cfg.vod[k];
+    for (const k of LOCAL.top) if (cfg[k] !== undefined) out[k] = cfg[k];
+    for (const k of LOCAL.prefs) if (cfg.prefs && cfg.prefs[k] !== undefined) out.prefs[k] = cfg.prefs[k];
+    for (const k of LOCAL.vod) if (cfg.vod && cfg.vod[k] !== undefined) out.vod[k] = cfg.vod[k];
     return out;
   }
-  /** `cfg` with this TV's parts from `dev` laid over it. */
+  /** `cfg` with the parts from `dev` (deviceParts) laid over it. */
   function withDevice(cfg, dev) {
-    for (const k of DEVICE.top) if (dev[k] !== undefined) cfg[k] = dev[k];
+    for (const k of LOCAL.top) if (dev[k] !== undefined) cfg[k] = dev[k];
     Object.assign(cfg.prefs, dev.prefs || {});
     Object.assign(cfg.vod, dev.vod || {});
     if (cfg.prefs.squish) cfg.prefs.wide = false;
@@ -150,6 +160,9 @@
       return tx("readwrite", (s) => s.clear(), () => mem.clear());
     },
     DEVICE,
+    PERSONAL,
+    /** What sync.js leaves out of the copy it saves (see LOCAL). */
+    LOCAL,
     get(k) { return tx("readonly", (s) => s.get(k), () => mem.get(k)); },
     put(k, v) { return tx("readwrite", (s) => s.put(v, k), () => mem.set(k, v)); },
     del(k) { return tx("readwrite", (s) => s.delete(k), () => mem.delete(k)); },

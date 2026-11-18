@@ -16,7 +16,8 @@
  *            second (409), which takes the first's copy.
  *
  * Editing a group (/?group=<id>, admins, from the Users page): the group's
- * settings are loaded instead of your own, and changes are saved to the group.
+ * settings are loaded instead of your own, and changes are saved to the group,
+ * all but the admin's own options (Store.PERSONAL), which a group never has.
  *
  * Per browser, in localStorage "iptv.sync.v1": { off, who, rev }
  *   off  this TV doesn't save on the server (Settings > Account)
@@ -80,11 +81,12 @@
   const why = (r) => (r.data && r.data.error) || `the server answered ${r.status}`;
 
   // ------------------------------------------------------------- the copy
-  /** The settings to save: Store.cfg without this TV's parts or what each TV
-   *  works out for itself (channel counts, download times, problems). */
+  /** The settings to save: Store.cfg without what stays here (Store.LOCAL:
+   *  this TV's parts; editing a group, the admin's own options) or what each
+   *  TV works out for itself (channel counts, download times, problems). */
   function shared(cfg) {
     const c = JSON.parse(JSON.stringify(cfg));
-    const D = Store.DEVICE;
+    const D = Store.LOCAL;
     for (const k of D.top) delete c[k];
     for (const k of D.prefs) delete c.prefs[k];
     for (const k of D.vod) delete c.vod[k];

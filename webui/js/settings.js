@@ -169,7 +169,7 @@
     return [
       {
         text: "Subtitles When Available", tag: p.ccDefault ? "On" : "Off",
-        info: { title: "Subtitles When Available", desc: "Turn subtitles on automatically when a channel has them. Press C while watching to switch them on or off." },
+        info: { title: "Subtitles When Available", desc: "Turn subtitles on automatically when a channel has them. Press C while watching to switch them on or off. Yours alone: group settings don't include it." + (Sync.editing ? ` Changing it now changes your own, not ${Sync.editing.name}'s.` : "") },
         act: () => { App.setPrefs({ ccDefault: !p.ccDefault }); render(); },
       },
       {
@@ -184,12 +184,12 @@
       },
       {
         text: "16:9 Mode (Widescreen TV)", tag: p.wide ? "On" : "Off",
-        info: { title: "16:9 Mode", desc: "For a widescreen TV or monitor. Widens the guide and its info panel to fill a 16:9 screen, shows a half hour more of the listings, and makes the guide's picture 16:9. Turns Squish Mode off." },
+        info: { title: "16:9 Mode", desc: "For a widescreen TV or monitor. Widens the guide and its info panel to fill a 16:9 screen, shows a half hour more of the listings, and makes the guide's picture 16:9. Turns Squish Mode off. Kept on this TV only, never in group settings." },
         act: () => { App.setPrefs({ wide: !p.wide }); render(); },
       },
       {
         text: "Squish Mode (4:3 TV)", tag: p.squish ? "On" : "Off",
-        info: { title: "Squish Mode", desc: "For a 16:9 box whose converter squeezes the picture onto a 4:3 TV. Draws the guide and the picture wider so they look right on the TV. Turns 16:9 Mode off." },
+        info: { title: "Squish Mode", desc: "For a 16:9 box whose converter squeezes the picture onto a 4:3 TV. Draws the guide and the picture wider so they look right on the TV. Turns 16:9 Mode off. Kept on this TV only, never in group settings." },
         act: () => { App.setPrefs({ squish: !p.squish }); render(); },
       },
       {
@@ -275,7 +275,7 @@
           text: `Editing Group: ${g}`, tag: Sync.problem ? "Problem" : "Saved", cls: Sync.problem ? "warn" : "",
           info: {
             title: `Editing ${g}'s Settings`, chan: g,
-            desc: (Sync.problem ? Sync.problem + " " : "") + `Changes you make now are saved as ${g}'s settings, and its people's TVs get them within a few minutes. Your own settings aren't touched. Screen shape and picture settings are this TV's own.`,
+            desc: (Sync.problem ? Sync.problem + " " : "") + `Changes you make now are saved as ${g}'s settings, and its people's TVs get them within a few minutes. Your own settings aren't touched. Screen shape and picture settings are this TV's own, and Subtitles When Available is each person's own: none of them are part of a group's settings.`,
           },
         },
         {
