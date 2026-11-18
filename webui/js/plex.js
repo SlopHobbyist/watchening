@@ -25,14 +25,7 @@
   const PRODUCT = "Watchening", VERSION = "1.0";
   const PLEXTV = "https://plex.tv/api/v2";
 
-  function clientId() {
-    const v = Store.cfg.vod;
-    if (!v.clientId) {
-      v.clientId = crypto.randomUUID ? crypto.randomUUID() : U.uid() + U.uid();
-      Store.save();
-    }
-    return v.clientId;
-  }
+  const clientId = () => OnDemand.deviceId();
   // Plex picks what a browser can play by its name
   const UA = navigator.userAgent;
   const PLATFORM = /Firefox\//.test(UA) ? "Firefox" : /Safari\//.test(UA) && !/Chrom(e|ium)\//.test(UA) ? "Safari" : "Chrome";

@@ -2,7 +2,7 @@
  * Modal pop-up in the guide's style: a title strip, optional message, text
  * fields and a vertical list of choices (highlighted like a selected listing).
  *
- *   Dialog.open({ title, text, big, fields: [{ id, label, value, placeholder }],
+ *   Dialog.open({ title, text, big, fields: [{ id, label, value, placeholder, type ("password") }],
  *                 buttons: [{ label, act(values) }], onCancel })
  *   (big: a line of large text under the message, such as a code to type in;
  *    Dialog.big() changes it while open)
@@ -32,7 +32,7 @@
       lab.className = "dlg-label";
       lab.textContent = f.label || "";
       const inp = document.createElement("input");
-      Object.assign(inp, { type: "text", value: f.value || "", placeholder: f.placeholder || "", spellcheck: false, autocomplete: "off" });
+      Object.assign(inp, { type: f.type === "password" ? "password" : "text", value: f.value || "", placeholder: f.placeholder || "", spellcheck: false, autocomplete: "off" });
       wrap.append(lab, inp);
       itemsEl.appendChild(wrap);
       const item = { kind: "field", el: wrap, input: inp, id: f.id };
@@ -84,7 +84,8 @@
 
   function values() {
     const v = {};
-    for (const it of cur.items) if (it.kind === "field") v[it.id] = it.input.value.trim();
+    // (passwords as typed: spaces can be part of one)
+    for (const it of cur.items) if (it.kind === "field") v[it.id] = it.input.type === "password" ? it.input.value : it.input.value.trim();
     return v;
   }
 

@@ -116,8 +116,8 @@ networks:
       accounts (a new admin is made on the next start). Saved settings are
       filed by account id, so they only match the accounts database they were
       made with.
-- [ ] Group settings carry any Plex sign-in in them to everyone in the group.
-      Set groups up with a Plex account you're happy to share (or none).
+- [ ] Group settings carry any Plex or Jellyfin sign-in in them to everyone in
+      the group. Set groups up with an account you're happy to share (or none).
 - [ ] Versions are pinned (Kratos `v26.2.0`, MediaFlow `v2.4.9`). Read their
       release notes before bumping them in `docker-compose.yaml`.
 - [ ] Upload bandwidth: whatever plays through the proxy while you're away

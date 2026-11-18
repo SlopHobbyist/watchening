@@ -141,10 +141,11 @@
         const same = o && o.url === pl.url && o.type === pl.type;
         Object.assign(pl, { count: same ? o.count : 0, updated: same ? o.updated : 0, error: same ? o.error : "" });
       }
-      // keep the server address this TV found (see sharedKey)
+      // keep the server address this TV found (see sharedKey); one that was
+      // typed in (Jellyfin, no list of connections) is the same everywhere
       for (const s of (next.vod && next.vod.sources) || []) {
         const o = oldSrc.get(s.id);
-        if (o && o.server && s.server && o.server.uri) Object.assign(s.server, { uri: o.server.uri, local: o.server.local });
+        if (o && o.server && s.server && o.server.uri && Array.isArray(s.server.conns)) Object.assign(s.server, { uri: o.server.uri, local: o.server.local });
       }
       await downloadFiles(next.playlists || []);
     }

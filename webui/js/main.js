@@ -313,7 +313,7 @@
           text: has ? "Movies and TV Shows" : "Set Up On Demand",
           info: has
             ? { title: "On Demand", chan: "ON DEMAND", desc: "Movies and TV shows from your media server, to watch whenever you like. Press OK." }
-            : { title: "On Demand", chan: "ON DEMAND", desc: "Watch the movies and shows on your Plex Media Server. Press OK to set it up." },
+            : { title: "On Demand", chan: "ON DEMAND", desc: "Watch the movies and shows on your Plex or Jellyfin server. Press OK to set it up." },
         };
       }
       case "search":

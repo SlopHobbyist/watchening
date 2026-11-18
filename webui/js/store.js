@@ -42,7 +42,7 @@
     vod: { clientId: "", sources: [], quality: "original", views: {}, hiddenLibs: [] },
   });
   /** What belongs to this TV, not to the person: the screen's shape and
-   *  picture settings, the last channel, the Plex device id. */
+   *  picture settings, the last channel, the id media servers know it by. */
   const DEVICE = { top: ["last", "screen", "screenCh"], prefs: ["squish", "wide"], vod: ["clientId"] };
   const editing = new URLSearchParams(location.search).get("group") || "";
 

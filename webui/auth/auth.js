@@ -502,7 +502,7 @@
           msg(`Added ${r.data.group.name}. Now give it settings: set them up on the TV, or copy someone's.`, "success"));
       }, "main");
       panel("Add Group", note,
-        p("A group's people get the settings you choose for it: playlists, channel order, On Demand servers and options. They can still change things on their own TVs; your next update replaces their changes. A Plex sign-in in the group's settings goes to everyone in it.", "note"),
+        p("A group's people get the settings you choose for it: playlists, channel order, On Demand servers and options. They can still change things on their own TVs; your next update replaces their changes. A Plex or Jellyfin sign-in in the group's settings goes to everyone in it.", "note"),
         nm.label,
         list.length ? el("div", { class: "field" }, el("span", { class: "lbl", text: "People in it" }), ...checks.map((c) => c.label)) : null,
         buttons(save, button("Cancel", done)));
@@ -545,7 +545,7 @@
         p(g.hasSettings
           ? `Set up${g.updated ? ` ${fmtDate(g.updated)}` : ""}${g.by ? ` by ${g.by}` : ""}. Change them on the TV (they're saved as you go), or copy someone's settings over them.`
           : "Not set up yet. Set them up on the TV, as you would your own, or copy someone's.", "note"),
-        p("A Plex sign-in in these settings goes to everyone in the group: they can watch from that Plex account's servers.", "note"),
+        p("A Plex or Jellyfin sign-in in these settings goes to everyone in the group: they can watch from that account's servers.", "note"),
         buttons(linkBtn("Set Up on TV", "/?group=" + encodeURIComponent(g.id))),
         list.length ? from.el : null,
         list.length ? buttons(copy) : null,

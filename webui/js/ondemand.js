@@ -12,7 +12,7 @@
  * and the provider for its type (OnDemand.register) does the talking.
  *
  *   provider = {
- *     label                               "Plex"
+ *     label                               "Plex", "Jellyfin"
  *     setup: [{ text, desc, act }]        ways to add a source (sign in, ...)
  *     describe(src)                       a line about a source, for Settings
  *     reconnect(src)                      find the server again (optional)
@@ -825,6 +825,15 @@
     register(type, p) { providers[type] = p; },
     sources,
     hasSources: () => sources().length > 0,
+    /** This TV's id for media servers (Plex's client id, Jellyfin's device id). */
+    deviceId() {
+      const v = Store.cfg.vod;
+      if (!v.clientId) {
+        v.clientId = crypto.randomUUID ? crypto.randomUUID() : U.uid() + U.uid();
+        Store.save();
+      }
+      return v.clientId;
+    },
     /** A source's libraries (for Settings: hiding and showing them). */
     async libraries(src) {
       return (await providers[src.type].root(src)).filter((it) => it.type === "library");

@@ -6,7 +6,7 @@
  *   Playlists  add by URL / upload file, zlive.st channels on/off, refresh,
  *              turn off, rename, remove, guide data (XMLTV) address
  *   Channels   reorder (Move, Move to Number), hide/show
- *   On Demand  sign in to Plex (or add a server by address), servers (and their
+ *   On Demand  sign in to Plex (or add a server by address) or Jellyfin, servers (and their
  *              libraries, shown or hidden), picture quality
  *   Options    subtitle defaults, channel icons, 16:9 mode, squish mode, CORS proxy, erase everything
  *   Account    who's signed in; saving settings on the server (sync.js) and the
@@ -23,7 +23,7 @@
   const PAGES = [
     { name: "Playlists", desc: "Add, refresh, rename and remove channel lists (M3U playlists), and choose where guide listings come from." },
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
-    { name: "On Demand", desc: "Sign in to Plex to watch the movies and shows on your media server, show or hide its libraries, and choose the picture quality." },
+    { name: "On Demand", desc: "Sign in to Plex or Jellyfin to watch the movies and shows on your media server, show or hide its libraries, and choose the picture quality." },
     { name: "Options", desc: "Subtitles, channel icons, 16:9 mode for widescreen TVs, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
     { name: "Account", desc: "Who's signed in, and saving your settings on the server for every TV you use. Change your password, sign out, and (for admins) manage people and groups." },
   ];
