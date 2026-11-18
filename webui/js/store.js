@@ -15,7 +15,8 @@
  *   prefs:  { epgUrl, ccDefault, ccSize, proxy, chanIcons, squish, wide }
  *           (chanIcons: built-in icons for channels without one, see logos.js;
  *            squish: 16:9 output squeezed onto a 4:3 TV, see fit() in main.js;
- *            wide: 16:9 layout for a widescreen display, see fit() in main.js)
+ *            wide: 16:9 layout for a widescreen display, see fit() in main.js;
+ *            on by default, so a new TV starts in 16:9 mode)
  *   last:   channel key last watched
  *   ccOffsets, screen, screenCh: subtitle offsets and screen options (see below)
  *   vod:    On Demand (see ondemand.js): { clientId, sources: [{ id, type, name, ... }],
@@ -38,7 +39,7 @@
     playlists: [],
     order: [],
     hidden: [],
-    prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "", chanIcons: true, squish: false, wide: false },
+    prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "", chanIcons: true, squish: false, wide: true },
     last: "",
     ccOffsets: {},   // channel key -> subtitle offset (seconds)
     screen: {},      // screen options for every channel: { aspect, scale, crop, overscan, splitScan, overscanY }

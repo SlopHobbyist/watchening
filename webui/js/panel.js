@@ -99,8 +99,9 @@
       if (top < rowsEl.scrollTop) rowsEl.scrollTop = top;
       else if (bot > rowsEl.scrollTop + rowsEl.clientHeight) rowsEl.scrollTop = bot - rowsEl.clientHeight;
     }
+    // the selected row's name in lime over its description, as in Settings' info panel
     const r = list[cur.sel];
-    descEl.textContent = (r && r.desc) || cur.desc || "";
+    descEl.replaceChildren(div("pnl-dt", r && !r.sep ? r.label : ""), div("pnl-dd", (r && r.desc) || cur.desc || ""));
     hintEl.textContent = r && r.step ? "◀▶ Change · ▲▼ Select · Back Close" : "OK Select · ▲▼ Move · Back Close";
   }
 

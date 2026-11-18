@@ -12,17 +12,32 @@
   Sign-in, account and Users pages: one page, drawn by auth.js from the path
   (/auth/login, /auth/account, /auth/users, /auth/recovery, /auth/error,
   /auth/logout). Public: nginx lets these through without a session.
-  #wrap is scaled to fit small TV screens (fit() in auth.js).
+  Laid out like the guide's Settings screen: header, title bar, a navy panel
+  (On Demand's) and the key hints. #wrap is an 800x600 (16:9 mode: 1067x600)
+  stage scaled to fit the screen, or a single column on a phone (fit() in
+  auth.js).
 -->
 <div id="wrap">
   <header id="hdr">
     <img id="logo" src="/assets/comcast_logo_white.svg" alt="" draggable="false">
-    <div id="tvl">TV Listings</div>
+    <div id="name">TV Listings</div>
+    <div id="clock"></div>
   </header>
-  <main id="box" aria-live="polite">
+  <div id="bar">
+    <svg id="icon" viewBox="0 0 38 28" aria-hidden="true">
+      <g fill="#fff">
+        <rect x="1" y="2" width="5" height="4"/><rect x="9" y="2" width="27" height="4"/>
+        <rect x="1" y="12" width="5" height="4"/><rect x="9" y="12" width="27" height="4"/>
+        <rect x="1" y="22" width="5" height="4"/><rect x="9" y="22" width="27" height="4"/>
+      </g>
+    </svg>
     <h1 id="title"></h1>
+    <div id="pos"></div>
+  </div>
+  <main id="box" aria-live="polite">
     <div id="body"><p class="note">Loading...</p></div>
   </main>
+  <footer id="foot"><div id="hint"></div></footer>
 </div>
 <script src="/auth/auth.js"></script>
 </body>

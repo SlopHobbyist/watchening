@@ -1,10 +1,15 @@
 /*
- * Sign-in, account and Users pages, in the guide's dialog style (see
- * #dlg in ../style.css). Unlike the guide these pages aren't a fixed stage:
- * they reflow for a phone (an invite link is often opened on one; html.narrow)
- * and use big text and a lime highlight on whatever has focus, for a TV
- * remote. A TV screen smaller than 800x600 gets #wrap laid out at that size
- * and scaled down (fit() in auth.js), so everything fits a 4:3 TV.
+ * Sign-in, account and Users pages, built from the guide's own parts (see
+ * ../style.css): Settings' header, title bar and key-hint footer around On
+ * Demand's navy panel, with its rounded buttons and the search screen's field
+ * (#kb-field). Whatever has focus turns pale yellow, as On Demand's selection
+ * does, so a TV remote always shows where it is.
+ *
+ * Like the guide, the page is a fixed 800x600 stage (1067x600 in 16:9 mode)
+ * scaled to fit the screen (fit() in auth.js), so it fills a 4:3 or a 16:9 TV
+ * the same way; the navy panel scrolls when a page is longer. A phone held
+ * upright gets a single column instead (html.narrow): an invite link is often
+ * opened on one.
  */
 @font-face {
   font-family: "GuideFont";
@@ -17,105 +22,216 @@
   --lime: #d2e6a8;
   --white: #d7d7dc;
   --ink: #1e1f1c;
+  --soft: #b9c9e6;      /* On Demand's secondary text */
   --err: #ffb39a;
-  --ok: #c9f0a0;
+  --sel: #f3f0a2;       /* On Demand's selection */
+  --sel-edge: #fffde4;
   --shadow: 1.5px 1.5px 1px rgba(0,0,0,.85);
+  --W: 800px;
   color-scheme: dark;
 }
+html.wide { --W: 1067px; }
 * { box-sizing: border-box; }
-html { background: #000; overflow-x: hidden; }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 body {
-  margin: 0; background: #000; color: var(--white);
-  font: 22px/1.3 var(--font); -webkit-text-stroke: 0.3px currentColor;
+  color: var(--white);
+  font: 22px/1.3 var(--font); -webkit-text-stroke: 0.45px currentColor;
+  -webkit-font-smoothing: antialiased;
 }
-#wrap { position: absolute; left: 0; top: 0; width: 100%; transform-origin: 0 0; padding-bottom: 1px; }
 
+/* ----------------------------------------------------------------- stage */
+#wrap {
+  position: absolute; left: 50%; top: 50%;
+  width: var(--W); height: 600px; overflow: hidden;
+  transform: translate(-50%, -50%) scale(var(--sx, 1), var(--sy, 1));
+  transform-origin: 50% 50%;
+}
+
+/* Settings' header (#m-hdr) */
 #hdr {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  min-height: 80px; padding: 16px max(16px, 5vw);
+  position: absolute; left: 0; top: 0; width: 100%; height: 96px;
   background: linear-gradient(#21486f, #1f456b 40%, #1d4268);
-  border-bottom: 4px solid #111230;
+  border-bottom: 1px solid #13183a;
 }
-#logo { width: 160px; max-width: 40vw; height: auto; }
-#tvl { color: var(--lime); font-size: 27px; text-shadow: var(--shadow); white-space: nowrap; }
+#logo { position: absolute; left: 53px; top: 40px; width: 177px; height: auto; }
+#name, #clock {
+  position: absolute; right: 56px; font-size: 26.5px; line-height: 28px;
+  text-shadow: var(--shadow); white-space: nowrap;
+}
+#name { top: 26px; color: var(--lime); }
+#clock { top: 55px; }
 
+/* the title bar (#m-bar) */
+#bar {
+  position: absolute; left: 0; top: 96px; width: 100%; height: 40px;
+  border-top: 4px solid #111230;
+  background: linear-gradient(#173f6b, #143d69);
+}
+#icon { position: absolute; left: 56px; top: 5px; width: 34px; height: 26px; filter: drop-shadow(1.5px 1.5px 0 #000); }
+#title, #pos { position: absolute; top: 4px; margin: 0; font-size: 27px; line-height: 28px; font-weight: 400; text-shadow: var(--shadow); white-space: nowrap; }
+#title { left: 100px; right: 220px; overflow: hidden; text-overflow: ellipsis; }
+#pos { right: 24px; }
+
+/* On Demand's navy panel (#v-menu); scrolls when a page is longer */
 #box {
-  width: min(640px, calc(100% - 32px)); margin: 32px auto; overflow: hidden;
-  border-radius: 8px; border: 1px solid #a9c8ef; box-shadow: 0 8px 30px rgba(0,0,0,.7);
-  background: linear-gradient(#0b2f66, #04204d);
+  position: absolute; left: 0; top: 136px; width: 100%; bottom: 36px;
+  border-top: 4px solid #111230;
+  background: linear-gradient(#173470, #1d3e7d 10%, #1f4282 75%, #1b3b78);
+  overflow-x: hidden; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #a7bbe0 #102a62;
 }
-#box.wide { width: min(980px, calc(100% - 32px)); }
-#title {
-  margin: 0; padding: 0 20px; min-height: 46px; line-height: 46px; font-size: 27px; font-weight: 400;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  background: linear-gradient(#cfdbf5 0, #5e89cd 3%, #4b7bbd 12%, #32639e 32%, #1d4e86 52%, #0e4073 70%, #083868 100%);
-  border-bottom: 2px solid #000110; color: var(--lime); text-shadow: var(--shadow);
+#box::-webkit-scrollbar { width: 10px; }
+#box::-webkit-scrollbar-track { background: #102a62; }
+#box::-webkit-scrollbar-thumb { background: #a7bbe0; border-radius: 5px; border: 2px solid #102a62; }
+#body { max-width: 760px; margin: 0 auto; padding: 18px 60px 24px; }
+#box.wide #body { max-width: none; }
+
+/* the key hints (#m-foot) */
+#foot {
+  position: absolute; left: 0; bottom: 0; width: 100%; height: 36px;
+  background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%);
+  border-top: 1px solid #7f8796;
 }
-#body { padding: 16px 20px 22px; }
-p { margin: 0 0 14px; text-shadow: var(--shadow); }
-.note { color: #aeb9d6; }
-.msg { margin: 0 0 14px; padding: 10px 12px; border-radius: 4px; background: rgba(0,0,0,.25); text-shadow: var(--shadow); }
-.msg.error { color: var(--err); }
-.msg.success { color: var(--ok); }
-h2 { margin: 18px 0 10px; font-size: 24px; font-weight: 400; color: var(--lime); text-shadow: var(--shadow); }
+#hint { position: absolute; left: 56px; right: 24px; top: 5px; font-size: 21px; line-height: 26px; white-space: nowrap; overflow: hidden; text-shadow: var(--shadow); color: #c3cde0; }
+
+/* ------------------------------------------------------------------ text */
+p { margin: 0 0 14px; font-size: 23px; line-height: 28px; text-shadow: var(--shadow); }
+.note { color: #c3cde0; font-size: 21px; line-height: 26px; }
+strong { font-weight: 400; color: var(--lime); }
+h2 {
+  margin: 22px 0 10px; font-size: 25px; line-height: 30px; font-weight: 400;
+  color: var(--lime); text-shadow: var(--shadow);
+}
 h2:first-child { margin-top: 0; }
+/* a message: like the guide's pop-up notes (#osd) */
+.msg {
+  margin: 0 0 14px; padding: 6px 16px; border-radius: 6px;
+  background: linear-gradient(#0b2f66, #04204d); border: 1px solid #5d82b8;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  font-size: 22px; line-height: 28px; text-shadow: var(--shadow);
+}
+.msg.error { color: var(--err); }
+.msg.success { color: var(--lime); }
 
-/* ------------------------------------------------------------- fields */
-label, .field { display: block; margin-bottom: 14px; }
-label > span, .field > .lbl { display: block; margin-bottom: 4px; text-shadow: var(--shadow); }
-.field > .check { margin: 0 0 6px; }
-.field-msg { display: block; margin-top: 4px; font-size: 19px; color: var(--err); text-shadow: var(--shadow); }
+/* ---------------------------------------------------------------- fields */
+/* label beside its field, on one line */
+label, .field {
+  display: grid; grid-template-columns: 210px minmax(0, 1fr); align-items: center; column-gap: 16px;
+  margin-bottom: 10px;
+}
+label > span, .field > .lbl { font-size: 22px; line-height: 26px; color: var(--soft); text-shadow: var(--shadow); }
+.field > .lbl { align-self: start; padding-top: 8px; }
+.field-msg { grid-column: 2; margin-top: 4px; font-size: 19px; line-height: 23px; color: var(--err) !important; }
+label[hidden] { display: none; }
+/* the search screen's field (#kb-field) */
 input[type=text], input[type=password], input:not([type]) {
-  width: 100%; height: 46px; padding: 0 12px; border-radius: 4px; outline: none;
-  border: 2px solid #5d78cd; background: #e9edf5; color: #14213d;
-  font: 23px var(--font); -webkit-text-stroke: 0;
+  width: 100%; height: 42px; padding: 0 20px; border-radius: 21px; outline: none;
+  border: 2px solid #a7bbe0; background: #102a62; color: #fff;
+  box-shadow: 0 0 0 1px #0b1b42, inset 0 2px 4px rgba(0,0,0,.45);
+  font: 24px var(--font); -webkit-text-stroke: 0.45px currentColor; text-shadow: var(--shadow);
+  caret-color: var(--lime);
 }
-input:focus { border-color: var(--lime); box-shadow: 0 0 0 3px var(--lime); }
-.check { display: flex; align-items: center; gap: 12px; cursor: pointer; }
-.check input { width: 26px; height: 26px; margin: 0; accent-color: var(--lime); }
-.check > span { margin: 0; }
-.choice { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+input::placeholder { color: #7f93bb; -webkit-text-stroke: 0; text-shadow: none; }
+input:focus {
+  border-color: var(--sel-edge); background: var(--sel); color: var(--ink);
+  -webkit-text-stroke: 0; text-shadow: none; caret-color: var(--ink);
+}
+input:focus::placeholder { color: #7d7a52; }
+input.link { font-size: 19px; }
 
-/* ------------------------------------------------------------ buttons */
-.buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
-button, a.btn {
-  min-height: 46px; padding: 0 20px; border: 0; border-radius: 4px; cursor: pointer;
-  background: linear-gradient(#14364c, #18374c); box-shadow: inset 0 1px 0 rgba(120,150,175,.25), 0 0 0 1px #2f5577;
-  color: var(--white); font: 24px/46px var(--font); text-decoration: none; text-shadow: var(--shadow);
-  -webkit-text-stroke: 0.3px currentColor; white-space: nowrap; outline: none;
+/* a checkbox or a choice, as a button with a box (or dot) in it */
+label.check {
+  display: flex; align-items: center; gap: 14px; min-height: 42px; padding: 0 20px;
+  border-radius: 21px; border: 2px solid #a7bbe0; background: #26498b; cursor: pointer;
+  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
 }
-button.main { background: linear-gradient(#2a5b86, #1f4a72); }
+label.check > span { color: #fff; font-size: 23px; line-height: 28px; }
+.check input {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0; outline: none; cursor: pointer;
+  width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; background: transparent;
+  filter: drop-shadow(1px 1px 0 rgba(0,0,0,.8));
+}
+.check input[type=radio] { border-radius: 50%; }
+.check input:checked { background: #fff; box-shadow: inset 0 0 0 3px #26498b; }
+label.check:focus-within, label.check:hover { border-color: var(--sel-edge); background: var(--sel); }
+label.check:focus-within > span, label.check:hover > span { color: var(--ink); text-shadow: none; -webkit-text-stroke: 0; }
+label.check:focus-within input, label.check:hover input { border-color: var(--ink); filter: none; }
+label.check:focus-within input:checked, label.check:hover input:checked { background: var(--ink); box-shadow: inset 0 0 0 3px var(--sel); }
+label.check:has(input:disabled) { cursor: default; opacity: .6; }
+/* lined up with the fields, as are the buttons that follow them */
+label.check, .choice, label + .buttons, .field + .buttons, .choice + .buttons { margin: 0 0 10px 226px; }
+.choice, .checks { display: grid; gap: 8px; margin-bottom: 10px; }
+.checks { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.field > .checks { margin-bottom: 0; }
+.choice label.check, .checks label.check { margin: 0; }
+
+/* --------------------------------------------------------------- buttons */
+/* On Demand's buttons (.v-btn) */
+.buttons { display: flex; flex-wrap: wrap; gap: 8px 10px; margin: 6px 0 10px; }
+button, a.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  height: 42px; padding: 0 24px; border-radius: 21px; cursor: pointer; outline: none;
+  border: 2px solid #a7bbe0; background: #26498b;
+  box-shadow: 0 0 0 1px #0b1b42, 2px 2px 3px rgba(0,0,0,.4);
+  color: #fff; font: 24px/30px var(--font); -webkit-text-stroke: 0.45px currentColor; text-shadow: var(--shadow);
+  text-decoration: none; white-space: nowrap;
+}
 button:focus, a.btn:focus, button:hover, a.btn:hover {
-  background: var(--lime); color: var(--ink); text-shadow: none; -webkit-text-stroke: 0;
+  border-color: var(--sel-edge); background: var(--sel); color: var(--ink); text-shadow: none; -webkit-text-stroke: 0;
 }
 button:disabled { opacity: .55; cursor: default; }
-button.small, a.btn.small { display: inline-block; min-height: 38px; padding: 0 12px; font-size: 20px; line-height: 38px; }
-/* one of several (pick() in auth.js) */
-.picks { margin-top: 0; gap: 8px; }
-button.pick[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--lime); color: var(--lime); }
-button.pick[aria-pressed="true"]::before { content: "\2713\00a0"; }
+button.small, a.btn.small { padding: 0 18px; font-size: 22px; }
+button.danger { color: #ffc3ad; }
+button.danger:focus, button.danger:hover { color: #7a1d00; }
+/* one of several (pick() in auth.js): the chosen one marked, like a choice */
+.picks { margin: 0; }
+button.pick[aria-pressed="true"] { color: var(--lime); }
+button.pick[aria-pressed="true"]::before { content: "\2713"; }
 button.pick[aria-pressed="true"]:focus, button.pick[aria-pressed="true"]:hover { color: var(--ink); }
-button.danger:focus, button.danger:hover { background: #f3b39e; }
 
-/* --------------------------------------------------------------- users */
-.users { width: 100%; border-collapse: collapse; margin-bottom: 18px; border-top: 1px solid #2f5577; }
-.users td { padding: 8px 8px; border-bottom: 1px solid #1c3c63; vertical-align: middle; }
-.users td.acts { text-align: right; }
-.users td.acts .buttons { justify-content: flex-end; margin: 0; gap: 6px; }
-.tag { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 3px; font-size: 18px; line-height: 26px; color: var(--ink); background: var(--lime); text-shadow: none; -webkit-text-stroke: 0; }
-.tag.off { background: #8b93a8; }
-.who { font-size: 19px; color: #aeb9d6; }
-.panel { margin: 0 0 18px; padding: 14px 16px; border-radius: 6px; background: rgba(0,0,0,.25); border: 1px solid #2f5577; }
-.link {
-  display: block; width: 100%; padding: 10px 12px; margin: 6px 0 10px; border-radius: 4px;
-  background: #e9edf5; color: #14213d; font: 19px/1.3 ui-monospace, Consolas, monospace; word-break: break-all;
-  user-select: all; -webkit-text-stroke: 0;
+/* ----------------------------------------------------------------- users */
+/* a person or a group: one wide button per row, as On Demand lists titles */
+.items { display: grid; gap: 8px; margin-bottom: 8px; }
+.item-row { display: flex; gap: 10px; }
+button.item { justify-content: flex-start; width: 100%; min-width: 0; overflow: hidden; padding: 0 22px; text-align: left; }
+.item-row > button.item { flex: 1; width: auto; }
+.i-name { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+.i-info { flex: 1; min-width: 0; margin-left: auto; text-align: right; overflow: hidden; text-overflow: ellipsis; font-size: 21px; color: var(--soft); }
+button.item:focus .i-info, button.item:hover .i-info { color: #4d5236; }
+.tag {
+  flex: none; display: inline-block; margin-left: 2px; padding: 0 8px; border-radius: 4px;
+  font-size: 18px; line-height: 24px; color: var(--ink); background: var(--lime); text-shadow: none; -webkit-text-stroke: 0;
 }
+.tag.off { background: #a7b2c8; }
+p > .tag { margin-left: 10px; vertical-align: 2px; }
 
-/* a phone (set by fit() in auth.js) */
-html.narrow body { font-size: 20px; }
-html.narrow #box { margin: 16px auto; }
-html.narrow .users tr { display: block; padding: 10px 0; border-bottom: 1px solid #1c3c63; }
-html.narrow .users td { display: block; padding: 4px 0; border: 0; }
-html.narrow .users td.acts { text-align: left; }
-html.narrow .users td.acts .buttons { justify-content: flex-start; }
+/* -------------------------------------------------------------- a phone */
+html.narrow, html.narrow body { height: auto; min-height: 100%; overflow: auto; }
+html.narrow #wrap {
+  position: static; width: auto; height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible;
+  transform: none; display: flex; flex-direction: column;
+}
+html.narrow #hdr, html.narrow #bar, html.narrow #box, html.narrow #foot { position: relative; left: auto; top: auto; bottom: auto; }
+html.narrow #hdr { height: 64px; flex: none; }
+html.narrow #logo { left: 16px; top: 20px; width: 120px; }
+html.narrow #name { right: 16px; top: 8px; font-size: 22px; }
+html.narrow #clock { right: 16px; top: 34px; font-size: 22px; }
+html.narrow #bar { flex: none; }
+html.narrow #icon { left: 16px; }
+html.narrow #title { left: 60px; right: 16px; font-size: 25px; }
+html.narrow #pos { display: none; }
+html.narrow #box { flex: 1; overflow: visible; }
+html.narrow #body { padding: 16px; }
+html.narrow #foot { flex: none; position: sticky; bottom: 0; }
+html.narrow #hint { left: 16px; right: 16px; font-size: 18px; }
+html.narrow label, html.narrow .field { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
+html.narrow .field-msg { grid-column: 1; }
+html.narrow .field > .lbl { padding-top: 0; }
+html.narrow label.check, html.narrow .choice, html.narrow label + .buttons, html.narrow .field + .buttons, html.narrow .choice + .buttons { margin-left: 0; }
+html.narrow .checks { grid-template-columns: minmax(0, 1fr); }
+/* a person or group on two lines: the name, then the details */
+html.narrow .item-row { flex-wrap: wrap; gap: 8px; }
+html.narrow .item-row > button.item { flex: 1 1 100%; }
+html.narrow button.item { height: auto; min-height: 42px; flex-wrap: wrap; row-gap: 0; padding: 5px 22px; }
+html.narrow .i-name { max-width: 100%; }
+html.narrow .i-info { flex-basis: 100%; margin-left: 0; text-align: left; font-size: 18px; line-height: 22px; }

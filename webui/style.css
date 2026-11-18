@@ -635,47 +635,58 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 #dlg.busy .dlg-btn { opacity: .6; }
 
 /* ---------------------------------------------------- pop-out options */
-/* Subtitle Options / Display Options: a panel at the top right of the
-   picture, which keeps playing underneath. */
+/* Subtitle Options / Display Options: a small Settings screen at the top
+   right of the picture, which keeps playing underneath. Built from the same
+   parts: the header's blue with the name in lime, rows like the guide's
+   cells on its gray grid (selection in lime), the info panel's gradient for
+   the selected row's description, and the footer's key hint. Square, in the
+   picture-in-picture frame's dark edge. */
 #pnl {
-  position: absolute; right: 32px; top: 32px; width: 332px;
+  position: absolute; right: 32px; top: 32px; width: 360px;
   display: none; z-index: 14; overflow: hidden;
-  border-radius: 8px; border: 1px solid #a9c8ef; box-shadow: 0 6px 24px rgba(0,0,0,.7);
-  background: linear-gradient(#0b2f66, #04204d);
+  border: 4px solid #11132d; box-shadow: 0 6px 24px rgba(0,0,0,.7);
+  background: #11132d;
 }
 #pnl.show { display: block; }
 #pnl-title {
-  height: 40px; padding: 0 16px; line-height: 40px; white-space: nowrap; overflow: hidden;
-  background: linear-gradient(#cfdbf5 0, #5e89cd 3%, #4b7bbd 12%, #32639e 32%, #1d4e86 52%, #0e4073 70%, #083868 100%);
-  border-bottom: 2px solid #000110;
-  color: var(--lime); font-size: 25px; text-shadow: var(--shadow);
+  height: 46px; padding: 0 16px; line-height: 48px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(#21486f, #1f456b 40%, #1d4268);
+  border-bottom: 4px solid #111230;
+  color: var(--lime); font-size: 26.5px; text-shadow: var(--shadow);
 }
-#pnl-rows { position: relative; max-height: 350px; overflow: hidden; padding: 4px 0; }
+#pnl-rows { position: relative; max-height: 340px; overflow: hidden; padding-top: 2px; background: #969695; }
 .pnl-row {
-  height: 36px; padding: 0 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;
-  font-size: 23px; line-height: 28px; white-space: nowrap; text-shadow: var(--shadow);
+  height: 38px; margin-bottom: 2px; padding: 0 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;
+  background: linear-gradient(#14364c, #18374c);
+  box-shadow: inset 0 1px 0 rgba(120,150,175,.18);
+  font-size: 24px; line-height: 30px; white-space: nowrap; text-shadow: var(--shadow);
 }
-.pnl-row.sel { background: var(--lime); color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
-.pnl-row.disabled { color: #7d88a6; cursor: default; }
+.pnl-row.sel { background: var(--lime); box-shadow: inset 0 1px 0 rgba(255,255,255,.45); color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
+.pnl-row.disabled { color: #8f98ab; cursor: default; }
 .pnl-lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pnl-mark { flex: none; width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; }
-.pnl-mark.on { background: currentColor; box-shadow: inset 0 0 0 2px #072a5c; }
+.pnl-mark { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; filter: drop-shadow(1px 1px 0 rgba(0,0,0,.8)); }
+.pnl-mark.on { background: currentColor; box-shadow: inset 0 0 0 2px #16374c; }
+.pnl-row.sel .pnl-mark { filter: none; }
 .pnl-row.sel .pnl-mark.on { box-shadow: inset 0 0 0 2px var(--lime); }
-.pnl-val { flex: none; display: flex; align-items: center; gap: 7px; }
-.pnl-val span { min-width: 86px; text-align: center; }
+.pnl-val { flex: none; display: flex; align-items: center; gap: 7px; color: #a9bcd8; }
+.pnl-row.sel .pnl-val { color: #1e1f1c; }
+.pnl-val span { min-width: 86px; text-align: center; font-size: 22px; }
 .pnl-val svg { width: 9px; height: 14px; fill: currentColor; cursor: pointer; filter: drop-shadow(1px 1px 0 rgba(0,0,0,.8)); }
 .pnl-row.sel .pnl-val svg { filter: none; }
-.pnl-sep { height: 9px; position: relative; }
-.pnl-sep::after { content: ""; position: absolute; left: 14px; right: 14px; top: 4px; height: 1px; background: #3d5f92; }
+/* a divider: a wider band of the gray grid */
+.pnl-sep { height: 4px; margin-bottom: 2px; background: #6f6f78; }
 #pnl-desc {
-  height: 107px; padding: 7px 14px 0; overflow: hidden;
-  border-top: 1px solid #3d5f92;
-  font-size: 19px; line-height: 23px; color: #c9d3e6; text-shadow: var(--shadow);
+  height: 124px; padding: 4px 14px 0; overflow: hidden;
+  border-top: 4px solid #111230;
+  background: linear-gradient(#131732 0%, #1f2a4e 30%, #33486d 55%, #52668a 80%, #6c7d97 100%);
+  text-shadow: var(--shadow);
 }
+.pnl-dt { height: 29px; font-size: 25px; line-height: 29px; color: var(--lime); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pnl-dd { font-size: 19.5px; line-height: 22px; max-height: 88px; overflow: hidden; }
 #pnl-hint {
-  height: 30px; padding: 0 14px; line-height: 30px; white-space: nowrap; overflow: hidden;
-  background: linear-gradient(#3a5279 0, #283962 50%, #1b2651 100%); border-top: 1px solid #7f8796;
-  font-size: 18px; color: #c3cde0; text-shadow: var(--shadow);
+  height: 32px; padding: 0 14px; line-height: 32px; white-space: nowrap; overflow: hidden;
+  background: linear-gradient(#3a5279 0, #354d73 4%, #283962 50%, #1b2651 100%); border-top: 1px solid #7f8796;
+  font-size: 19px; color: #c3cde0; text-shadow: var(--shadow);
 }
 
 /* Editing a group's settings (sync.js): a strip across the top of the window. */

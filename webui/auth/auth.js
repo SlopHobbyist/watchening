@@ -15,15 +15,29 @@
  *   /auth/logout     signs out, then back to sign-in
  *
  * Kratos flows are fetched and submitted as JSON and drawn from their "nodes"
- * (fields, buttons, messages). Arrow keys move between fields and buttons, so
- * a TV remote works, and a small TV-shaped screen gets the page scaled to fit
- * like the guide (see fit() below).
+ * (fields, buttons, messages). The page looks and works like the guide's
+ * Settings screen: arrow keys move between fields and buttons and Back goes
+ * back, so a TV remote works, and the page is a TV-shaped stage scaled to fit
+ * the screen (see fit() below), or a single column on a phone.
  */
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
   const box = $("box"), titleEl = $("title"), bodyEl = $("body");
   const K = "/kratos";
+  /**
+   * The screen around the page: the name in the header (lime), what the
+   * remote's Back key does, and a count at the right of the title bar. The
+   * account and Users pages belong to Settings > Account, so they say
+   * "Settings" and Back goes back there.
+   */
+  const scr = { name: "TV Listings", back: null, backLabel: "", pos: "" };
+  /** Back to wherever the page was opened from (the guide's Settings), or the guide. */
+  const leave = () => {
+    if (history.length > 1 && document.referrer && new URL(document.referrer).origin === location.origin) history.back();
+    else location.assign("/");
+  };
+  const inSettings = () => Object.assign(scr, { name: "Settings", back: leave, backLabel: "Return" });
 
   // ------------------------------------------------------------------ dom
   function el(tag, attrs, ...kids) {
@@ -42,10 +56,23 @@
   function page(title, ...kids) {
     document.title = `${title} · TV Listings`;
     titleEl.textContent = title;
+    $("name").textContent = scr.name;
+    $("pos").textContent = scr.pos;
     bodyEl.replaceChildren(...kids.flat().filter(Boolean));
-    const first = [...bodyEl.querySelectorAll("input:not([type=hidden]):not([hidden]):not(:disabled), button:not(:disabled), a.btn")][0];
+    box.scrollTop = 0;
+    hint();
+    const first = focusables()[0];
     if (first) first.focus({ preventScroll: true });
   }
+  const focusables = () => [...bodyEl.querySelectorAll("input:not([type=hidden]):not(:disabled), button:not(:disabled), a.btn")]
+    .filter((x) => x.offsetParent !== null || x.getClientRects().length);
+  /** The key hints at the bottom, for what has focus. */
+  function hint() {
+    const t = document.activeElement;
+    const typing = t && t.tagName === "INPUT" && t.type !== "checkbox" && t.type !== "radio";
+    $("hint").textContent = [typing ? "OK Enter" : "OK Select", typing ? "▲▼ Move" : "▲▼◀▶ Move", scr.back && `Back ${scr.backLabel}`].filter(Boolean).join(" · ");
+  }
+  document.addEventListener("focusin", hint);
   const p = (text, cls) => el("p", { class: cls, text });
   const msg = (text, type) => el("div", { class: "msg " + (type || "info"), text, role: type === "error" ? "alert" : null });
   const button = (label, onclick, cls) => el("button", { type: "button", class: cls, text: label, onclick });
@@ -188,7 +215,14 @@
       const r = await api("POST", rel(flow.ui.action), body);
       submit.disabled = false;
       if (r.status === 200) return opts.done(r.data, form);
-      if (r.status === 400 && r.data && r.data.ui) return form.replaceWith(flowForm(r.data, opts));
+      if (r.status === 400 && r.data && r.data.ui) {
+        // the form again, with what went wrong: back on its first field, for a remote
+        const again = flowForm(r.data, opts);
+        form.replaceWith(again);
+        const f = again.querySelector("input:not([type=hidden]):not([hidden])");
+        if (f) f.focus();
+        return;
+      }
       if (follow(r)) return;
       form.querySelectorAll(".msg").forEach((m) => m.remove());
       form.prepend(msg(errText(r), "error"));
@@ -229,6 +263,7 @@
     const m = await me();
     if (m.auth === false) return authOff();
     if (!m.user) return go("/auth/login?return_to=/auth/account");
+    inSettings();
     const flow = await getFlow("settings");
     if (!flow) return;
     const u = m.user;
@@ -296,18 +331,25 @@
       return page("Users", p("Only admins can manage users."), buttons(linkBtn("Your Account", "/auth/account"), linkBtn("Go to TV", "/")));
     }
     box.classList.add("wide");
+    inSettings();
     const myId = m.user.id;
     let list = [], groups = [];
-    const top = el("div");       // messages and the add/edit/link panels
+    const top = el("div");       // a message over the lists
     const people = el("div"), groupsEl = el("div");
+    let back = "";               // the button to focus on the way back to the lists (data-key)
 
+    /** Reload people and groups, and show the lists with `note` (a message) over them. */
     async function load(note) {
       const [r, g] = await Promise.all([api("GET", "/api/admin/users"), api("GET", "/api/admin/groups")]);
-      if (r.status !== 200 || g.status !== 200) { top.replaceChildren(msg(errText(r.status !== 200 ? r : g), "error")); return; }
-      list = r.data.users;
-      groups = g.data.groups;
-      draw();
-      if (note) top.replaceChildren(note);
+      if (r.status !== 200 || g.status !== 200) {
+        top.replaceChildren(msg(errText(r.status !== 200 ? r : g), "error"));
+      } else {
+        list = r.data.users;
+        groups = g.data.groups;
+        draw();
+        top.replaceChildren(...(note ? [note] : []));
+      }
+      showLists();
     }
     const name = (u) => u.name || u.username;
     const groupName = (id) => (groups.find((g) => g.id === id) || {}).name || "";
@@ -315,36 +357,52 @@
     const fmtDate = (s) => new Date(s).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     const fmtDay = (s) => new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
+    /** A person or group: one wide button, its name at the left and the details at the right. */
+    const item = (key, label, tags, info, onclick) => el("button", { type: "button", class: "item", "data-key": key, onclick },
+      el("span", { class: "i-name", text: label }), ...tags, el("span", { class: "i-info", text: info }));
+
     function draw() {
-      people.replaceChildren(el("table", { class: "users" },
-        el("tbody", {}, list.map((u) => el("tr", {},
-          el("td", {},
-            el("div", { text: name(u) }, u.id === myId ? el("span", { class: "tag", text: "You" }) : null, !u.active ? el("span", { class: "tag off", text: "Off" }) : null),
-            el("div", { class: "who", text: [u.username, u.admin ? "Admin" : "Viewer", groupName(u.group)].filter(Boolean).join(" · ") })),
-          el("td", { class: "acts" }, buttons(button("Edit", () => editPanel(u), "small"))))))));
+      people.replaceChildren(el("div", { class: "items" }, list.map((u) => item("u:" + u.id, name(u),
+        [u.id === myId && el("span", { class: "tag", text: "You" }), !u.active && el("span", { class: "tag off", text: "Off" })],
+        [u.username, u.admin ? "Admin" : "Viewer", groupName(u.group)].filter(Boolean).join(" · "),
+        () => editPanel(u)))));
       groupsEl.replaceChildren(groups.length
-        ? el("table", { class: "users" }, el("tbody", {}, groups.map((g) => {
+        ? el("div", { class: "items" }, groups.map((g) => {
           const n = membersOf(g).length;
-          return el("tr", {},
-            el("td", {},
-              el("div", { text: g.name }, !g.hasSettings ? el("span", { class: "tag off", text: "Not Set Up" }) : null),
-              el("div", { class: "who", text: [`${n} ${n === 1 ? "person" : "people"}`, g.hasSettings && g.updated ? `updated ${fmtDay(g.updated)}${g.by ? " by " + g.by : ""}` : ""].filter(Boolean).join(" · ") })),
-            el("td", { class: "acts" }, buttons(
-              linkBtn("Set Up on TV", "/?group=" + encodeURIComponent(g.id), "small"),
-              button("Edit", () => groupPanel(g), "small"))));
-        })))
+          return el("div", { class: "item-row" },
+            item("g:" + g.id, g.name, [!g.hasSettings && el("span", { class: "tag off", text: "Not Set Up" })],
+              [`${n} ${n === 1 ? "person" : "people"}`, g.hasSettings && g.updated ? `updated ${fmtDay(g.updated)}${g.by ? " by " + g.by : ""}` : ""].filter(Boolean).join(" · "),
+              () => groupPanel(g)),
+            linkBtn("Set Up on TV", "/?group=" + encodeURIComponent(g.id), "small"));
+        }))
         : p("No groups yet.", "note"));
     }
 
-    function panel(title, ...kids) {
-      const pnl = el("div", { class: "panel" }, el("h2", { text: title }), ...kids);
-      top.replaceChildren(pnl);
-      const f = pnl.querySelector("input:not([type=hidden]):not(:disabled), button");
-      if (f) f.focus();
-      pnl.scrollIntoView({ block: "nearest" });
-      return pnl;
+    /** The lists: people and groups, with the buttons to add them. */
+    function showLists() {
+      inSettings();
+      scr.pos = `${list.length} ${list.length === 1 ? "person" : "people"}`;
+      page("Users",
+        p("Everyone who can sign in. Each person's settings are saved on the server; put people in a group to set up their TVs for them.", "note"),
+        buttons(button("Add User", addPanel), button("Add Group", addGroupPanel), linkBtn("Your Account", "/auth/account"), linkBtn("Go to TV", "/")),
+        top,
+        el("h2", { text: "People" }), people,
+        el("h2", { id: "groups", text: "Groups" }), groupsEl);
+      // back where we were: the person or group just edited
+      const b = back && bodyEl.querySelector(`[data-key="${CSS.escape(back)}"]`);
+      back = "";
+      if (b) { b.focus({ preventScroll: true }); b.scrollIntoView({ block: "center" }); }
+      else if (top.firstChild) top.scrollIntoView({ block: "nearest" });
     }
-    const done = () => { top.replaceChildren(); };
+
+    /** Adding or changing something: a screen of its own, Back (or Cancel) returns to the lists. */
+    function panel(title, ...kids) {
+      const from = document.activeElement && document.activeElement.closest("[data-key]");
+      if (from) back = from.dataset.key;
+      Object.assign(scr, { back: done, backLabel: "Cancel", pos: "" });
+      page(title, ...kids);
+    }
+    const done = () => { top.replaceChildren(); showLists(); };
     const field = (label, attrs) => {
       const input = el("input", Object.assign({ type: "text", autocapitalize: "none", autocorrect: "off", spellcheck: "false", autocomplete: "off" }, attrs));
       return { input, label: el("label", {}, el("span", { text: label }), input) };
@@ -380,6 +438,8 @@
           try { await navigator.clipboard.writeText(url); ok = true; } catch { try { ok = document.execCommand("copy"); } catch { /* */ } }
           e.target.textContent = ok ? "Copied" : "Select and copy it";
         }, "main"), button("Done", done)));
+      scr.backLabel = "Done";
+      hint();
     }
 
     function addPanel() {
@@ -403,9 +463,10 @@
         const r = await api("POST", "/api/admin/users", body);
         save.disabled = false;
         if (r.status !== 201) return note.replaceChildren(msg(errText(r), "error"));
+        back = "u:" + r.data.user.id;
+        if (!r.data.link) return load(msg(`Added ${r.data.user.username}. They can sign in with the password you chose.`, "success"));
         await load();
-        if (r.data.link) showLink(r.data.user, r.data, `Added ${r.data.user.username}. Send them this link to choose their password.`);
-        else top.replaceChildren(msg(`Added ${r.data.user.username}. They can sign in with the password you chose.`, "success"));
+        showLink(r.data.user, r.data, `Added ${r.data.user.username}. Send them this link to choose their password.`);
       }, "main");
       panel("Add User", note, user.label, nm.label, admin.label, grp && grp.el,
         el("div", { class: "choice" },
@@ -445,25 +506,30 @@
         buttons(save, button("Cancel", done)),
         el("h2", { text: "More" }),
         buttons(
-          button("Sign-In Link", () => makeLink(u), "small"),
-          !self && button("Sign Out Everywhere", () => signOut(u), "small"),
-          !self && button("Remove", () => remove(u), "small danger")));
+          button("Sign-In Link", () => makeLink(u, note), "small"),
+          !self && button("Sign Out Everywhere", () => signOut(u, note), "small"),
+          !self && button("Remove", () => remove(u, note), "small danger")));
     }
 
-    async function makeLink(u) {
+    // from the Edit screen: a problem shows there (in `note`), success back on the lists
+    const failed = (note, r) => { note.replaceChildren(msg(errText(r), "error")); box.scrollTop = 0; };
+    async function makeLink(u, note) {
       const r = await api("POST", `/api/admin/users/${u.id}/link`, {});
-      if (r.status !== 200) return top.replaceChildren(msg(errText(r), "error"));
+      if (r.status !== 200) return failed(note, r);
       showLink(u, r.data);
     }
-    async function signOut(u) {
+    async function signOut(u, note) {
       if (!confirm(`Sign ${name(u)} out on every TV, phone and computer?`)) return;
       const r = await api("POST", `/api/admin/users/${u.id}/signout`, {});
-      top.replaceChildren(r.status === 204 ? msg(`${name(u)} is signed out everywhere.`, "success") : msg(errText(r), "error"));
+      if (r.status !== 204) return failed(note, r);
+      top.replaceChildren(msg(`${name(u)} is signed out everywhere.`, "success"));
+      showLists();
     }
-    async function remove(u) {
+    async function remove(u, note) {
       if (!confirm(`Remove ${name(u)} (${u.username})? They won't be able to sign in again.`)) return;
       const r = await api("DELETE", `/api/admin/users/${u.id}`);
-      if (r.status !== 204) return top.replaceChildren(msg(errText(r), "error"));
+      if (r.status !== 204) return failed(note, r);
+      back = "";
       load(msg(`Removed ${u.username}.`, "success"));
     }
 
@@ -504,7 +570,7 @@
       panel("Add Group", note,
         p("A group's people get the settings you choose for it: playlists, channel order, On Demand servers and options. They can still change things on their own TVs; your next update replaces their changes. A Plex or Jellyfin sign-in in the group's settings goes to everyone in it.", "note"),
         nm.label,
-        list.length ? el("div", { class: "field" }, el("span", { class: "lbl", text: "People in it" }), ...checks.map((c) => c.label)) : null,
+        list.length ? el("div", { class: "field" }, el("span", { class: "lbl", text: "People in it" }), el("div", { class: "checks" }, checks.map((c) => c.label))) : null,
         buttons(save, button("Cancel", done)));
     }
 
@@ -539,7 +605,7 @@
       });
       panel(`Group: ${g.name}`, note,
         nm.label,
-        list.length ? el("div", { class: "field" }, el("span", { class: "lbl", text: "People in it" }), ...checks.map((c) => c.label)) : null,
+        list.length ? el("div", { class: "field" }, el("span", { class: "lbl", text: "People in it" }), el("div", { class: "checks" }, checks.map((c) => c.label))) : null,
         buttons(save, button("Cancel", done)),
         el("h2", { text: "Settings" }),
         p(g.hasSettings
@@ -559,13 +625,6 @@
         }, "small danger")));
     }
 
-    page("Users",
-      p("Everyone who can sign in. Each person's settings are saved on the server; put people in a group to set up their TVs for them.", "note"),
-      buttons(button("Add User", addPanel, "main"), button("Add Group", addGroupPanel), linkBtn("Your Account", "/auth/account"), linkBtn("Go to TV", "/")),
-      el("div", { style: "height:16px" }),
-      top,
-      el("h2", { text: "People" }), people,
-      el("h2", { id: "groups", text: "Groups" }), groupsEl);
     await load();
     if (location.hash === "#groups") {
       const first = groupsEl.querySelector("a.btn, button");
@@ -575,55 +634,103 @@
   }
 
   // -------------------------------------------------------- remote control
-  /** ▲▼ move between fields and buttons (◀▶ too, outside text fields). */
+  /*
+   * The arrows move to the nearest field or button that way, as on the
+   * guide's screens: ▲▼ to the row above or below (the button most nearly
+   * in line), ◀▶ along a row. In a text field ◀▶ move the cursor instead.
+   * Back (Esc, a remote's Back key, or Backspace outside a text field) does
+   * what the key hints say: Cancel on the Users page's screens, otherwise
+   * back to Settings.
+   */
+  const BACK = new Set(["Escape", "GoBack", "BrowserBack", "XF86Back"]);
+  const BACK_CODES = new Set([461, 10009]); // webOS, Tizen
+
+  /** The nearest of `all` from `t` in direction `k` (an arrow key's name). */
+  function nearest(all, t, k) {
+    const r = t.getBoundingClientRect();
+    const cy = (r.top + r.bottom) / 2, cx = (r.left + r.right) / 2;
+    const rects = all.map((x) => [x, x.getBoundingClientRect()]).filter(([x]) => x !== t);
+    if (k === "ArrowDown" || k === "ArrowUp") {
+      const d = k === "ArrowDown" ? 1 : -1;
+      const ahead = rects.filter(([, b]) => d * ((b.top + b.bottom) / 2 - cy) > 4);
+      if (!ahead.length) return null;
+      // the next row: the closest edge that way, then the button nearest in line
+      const edge = d > 0 ? Math.min(...ahead.map(([, b]) => b.top)) : Math.max(...ahead.map(([, b]) => b.bottom));
+      const row = ahead.filter(([, b]) => Math.abs((d > 0 ? b.top : b.bottom) - edge) < 8);
+      const off = (b) => (b.right < r.left ? r.left - b.right : b.left > r.right ? b.left - r.right : 0) + Math.abs(b.left - r.left) / 1000;
+      row.sort((a, b) => off(a[1]) - off(b[1]));
+      return row[0][0];
+    }
+    const d = k === "ArrowRight" ? 1 : -1;
+    const along = rects.filter(([, b]) => b.top < r.bottom - 4 && b.bottom > r.top + 4 && d * ((b.left + b.right) / 2 - cx) > 4);
+    along.sort((a, b) => d * (a[1].left - b[1].left));
+    return along.length ? along[0][0] : null;
+  }
+
   document.addEventListener("keydown", (e) => {
     const k = e.key;
-    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(k)) return;
     const t = document.activeElement;
     const typing = t && t.tagName === "INPUT" && /^(text|password)$/.test(t.type);
-    if (typing && (k === "ArrowLeft" || k === "ArrowRight")) return;
-    const all = [...bodyEl.querySelectorAll("input:not([type=hidden]):not(:disabled), button:not(:disabled), a.btn")]
-      .filter((x) => x.offsetParent !== null);
-    if (!all.length) return;
-    const i = all.indexOf(t);
-    const d = k === "ArrowDown" || k === "ArrowRight" ? 1 : -1;
-    const next = all[i < 0 ? 0 : Math.max(0, Math.min(all.length - 1, i + d))];
-    if (next !== t) {
+    if (BACK.has(k) || BACK_CODES.has(e.keyCode) || (k === "Backspace" && !typing)) {
+      if (!scr.back) return;
       e.preventDefault();
-      next.focus();
+      scr.back();
+      return;
+    }
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(k)) return;
+    if (typing && (k === "ArrowLeft" || k === "ArrowRight")) return;
+    const all = focusables();
+    if (!all.length) return;
+    e.preventDefault();
+    const next = all.includes(t) ? nearest(all, t, k) : all[0];
+    if (next) {
+      next.focus({ preventScroll: true });
       next.scrollIntoView({ block: "nearest" });
+    } else if (k === "ArrowUp" && !typing) {
+      box.scrollTop = 0;   // at the top: show what's above (the page's notes)
     }
   });
 
   // ------------------------------------------------------------ screen fit
   /*
-   * Like the guide (fit() in ../js/main.js): a TV-shaped screen smaller than
-   * the guide's 800x600 (a 4:3 TV at 640x480, say) gets the page laid out at
-   * that size and scaled down to fit, instead of the phone layout. In squish
-   * mode (a 16:9 picture squeezed onto a 4:3 TV: Settings > Options, kept in
-   * this browser) the page is drawn wider to match. Phones and bigger screens
-   * lay it out as it is; "narrow" switches to the one-column layout.
+   * Like the guide (fit() in ../js/main.js): the page is an 800x600 stage, or
+   * 1067x600 in 16:9 mode, scaled to fill the screen; in squish mode (a 16:9
+   * picture squeezed onto a 4:3 TV) it's drawn wider to match. Both are kept
+   * in this browser by the guide (Settings > Options); 16:9 mode is on until
+   * it's turned off, as in ../js/store.js. A phone held upright, or one
+   * turned sideways, gets the single-column page instead (html.narrow).
    */
   const wrap = $("wrap");
-  let scale = 1;
   function fit() {
-    let squish = false;
-    try { squish = !!((JSON.parse(localStorage.getItem("iptv.config.v1") || "null") || {}).prefs || {}).squish; } catch { /* */ }
+    let prefs = {};
+    try { prefs = (JSON.parse(localStorage.getItem("iptv.config.v1") || "null") || {}).prefs || {}; } catch { /* */ }
+    const squish = !!prefs.squish, wide = !squish && prefs.wide !== false;
+    const w = window.innerWidth, h = window.innerHeight;
+    const phone = window.matchMedia && matchMedia("(pointer: coarse)").matches && Math.min(w, h) < 500;
+    const narrow = w < h || phone;
+    const root = document.documentElement;
+    root.classList.toggle("narrow", narrow);
+    root.classList.toggle("wide", wide && !narrow);
+    if (narrow) {
+      wrap.style.removeProperty("--sx");
+      wrap.style.removeProperty("--sy");
+      return;
+    }
     const k = squish ? 3 / 4 : 1;
-    const w = window.innerWidth * k, h = window.innerHeight;
-    scale = w >= h ? Math.min(1, w / 800, h / 600) : 1;
-    const lw = w / scale;
-    wrap.style.width = lw + "px";
-    wrap.style.minHeight = h / scale + "px";
-    wrap.style.transform = scale === 1 && k === 1 ? "" : `scale(${scale / k}, ${scale})`;
-    document.documentElement.classList.toggle("narrow", lw < 700);
-    height();
+    const s = Math.min((w * k) / (wide ? 1067 : 800), h / 600);
+    wrap.style.setProperty("--sx", s / k);
+    wrap.style.setProperty("--sy", s);
   }
-  // the scaled page is out of the flow: the body takes its scaled height, for scrolling
-  const height = () => { document.body.style.height = Math.ceil(wrap.offsetHeight * scale) + "px"; };
   window.addEventListener("resize", fit);
-  if (window.ResizeObserver) new ResizeObserver(height).observe(wrap);
   fit();
+
+  // the clock in the header, as on the guide (U.fmtClock in ../js/util.js)
+  function clock() {
+    const d = new Date(), h = d.getHours();
+    $("clock").textContent = `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")}${h < 12 ? "a" : "p"}m`;
+  }
+  clock();
+  setInterval(clock, 5000);
 
   // ----------------------------------------------------------------- route
   const ROUTES = { login, account, users, recovery, error, logout };
