@@ -2,22 +2,40 @@
 
 A cable box simulator! Watch IPTV and Plex/Jellyfin with a classic cable aesthetic.
 
+## Features
+### Screens
+- **Interactive guide** - in the style of the 2005 Comcast iGuide
+- **Video player** - can display subtitles and change aspect ratios
+- **On Demand** - can play pre recorded media from various sources
+- **Account management** - can remotely manage settings for family members and novices
+### Sources
+- **Plex**
+- **Jellyfin**
+- **Stremio** - debrid caches
+- **IPTV playlists** - m3u/m3u8 files or links
+- **Other external players** - through embeds, or apis like zlive
+
 ## Self Hosting
 
-Install `Docker` first.
+### First launch
+
+Install `Docker` first
+`git clone https://github.com/SlopHobbyist/watchening`
 
 ```sh
 docker compose up -d
 docker compose logs accounts     # prints the admin password, can be changed later
 ```
 
-Open <http://localhost:8080> and sign in as `admin` with the password from the
-log (it's also in `data/admin-login.txt`). Change it under
-**Settings > Account > Change Password**, then add everyone else under
-**Manage Users**.
+Some linux systems require `sudo` in front of the commands.
 
-Settings, if you need any, go in a `.env` file next to `docker-compose.yaml`:
-copy `.env.example` and edit it. The ones most people change:
+Open <http://localhost:8080> and sign in as `admin` with the password from the
+log. If you missed it, it's also printed to `data/admin-login.txt`.
+
+Password is generated on first start. Change it under `Settings > Account > Change Password`, then add everyone else under `Manage Users`.
+
+Settings go in `.env` file next to `docker-compose.yaml`:
+copy `.env.example` and edit it. Main ones you should change:
 
 | Setting      | What it's for |
 |--------------|---------------|
@@ -25,32 +43,25 @@ copy `.env.example` and edit it. The ones most people change:
 | `WEBUI_PORT` | The port the site is published on (default `8080`). |
 | `AUTH`       | `on` (default) needs sign-in. `off` has none, and only answers your home network. |
 
-Then run `docker compose up -d` again. Secrets are made on the first start;
-there are no default passwords to change.
+Then run `docker compose up -d` again.
 
-Playlists, channel order, On Demand servers and options are saved to each
-person's account, so every TV they sign in on has them. Screen shape and
-picture settings stay with each TV. To set up TVs for other people, an admin
-makes a **group** under Manage Users and either sets its settings up on the TV
-(**Set Up on TV**) or copies someone's. Everyone in the group gets them, and
-gets the admin's later updates too. A TV can keep its settings to itself instead:
-**Settings > Account > Save Settings on Server**. With `AUTH=off`, the home
-network shares one saved copy.
+Settings are saved to each user account, except for aspect ratio.
 
-Streams the browser can't play directly play through the server's built-in
-proxy ([MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy)). That
-covers an `http://` stream on an `https://` site, a server that blocks web
-pages, and MPEG-DASH.
+### User accounts and settings
 
-The on-screen keyboard's **Voice** key searches by talking. What's said is
-turned into text on your own server, on its CPU, by one of
-[FUTO's voice input models](https://keyboard.futo.tech/voice-input-models)
-(`SPEECH_MODEL` in `.env`); nothing is sent anywhere else, and nothing is kept.
-Browsers only allow the microphone on an `https://` address (or
-`http://localhost`), and the page only sends recordings over those, so the
-Voice key appears only there.
+Users can be put into groups to share settings, this way family members and computer novices can have settings changed for them.
+
+TVs can choose to save settings in their browser if they wish with `Settings > Account > Save Settings on Server`.
 
 Saved settings, groups and uploaded playlists are kept in `data/settings/`.
+
+`AUTH=off` disable accounts, and ensures the home network shares one saved copy.
+
+### Other
+
+Streams browsers can't play sent through [MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy) first.
+
+There's a voice search built into the keyboard. Runs [FUTO's voice input models](https://keyboard.futo.tech/voice-input-models) on server. Can change `SPEECH_MODEL` in `.env`. You must serve over **HTTPS** or browsers refuse to allow microphone permission.
 
 Putting it on the internet behind a reverse proxy: see
 [docs/REMINDERS.md](docs/REMINDERS.md).
