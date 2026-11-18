@@ -1,5 +1,7 @@
 # Project Specific
 inspiration/
+# first sign-in file and other local data (see docker-compose.yaml)
+data/
 
 # macOS
 .DS_Store

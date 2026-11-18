@@ -1,0 +1,121 @@
+/*
+ * Sign-in, account and Users pages, in the guide's dialog style (see
+ * #dlg in ../style.css). Unlike the guide these pages aren't a fixed stage:
+ * they reflow for a phone (an invite link is often opened on one; html.narrow)
+ * and use big text and a lime highlight on whatever has focus, for a TV
+ * remote. A TV screen smaller than 800x600 gets #wrap laid out at that size
+ * and scaled down (fit() in auth.js), so everything fits a 4:3 TV.
+ */
+@font-face {
+  font-family: "GuideFont";
+  src: url("/fonts/TiresiasScreenfont-web.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+:root {
+  --font: "GuideFont", "Tiresias Screenfont", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --lime: #d2e6a8;
+  --white: #d7d7dc;
+  --ink: #1e1f1c;
+  --err: #ffb39a;
+  --ok: #c9f0a0;
+  --shadow: 1.5px 1.5px 1px rgba(0,0,0,.85);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: #000; overflow-x: hidden; }
+body {
+  margin: 0; background: #000; color: var(--white);
+  font: 22px/1.3 var(--font); -webkit-text-stroke: 0.3px currentColor;
+}
+#wrap { position: absolute; left: 0; top: 0; width: 100%; transform-origin: 0 0; padding-bottom: 1px; }
+
+#hdr {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 80px; padding: 16px max(16px, 5vw);
+  background: linear-gradient(#21486f, #1f456b 40%, #1d4268);
+  border-bottom: 4px solid #111230;
+}
+#logo { width: 160px; max-width: 40vw; height: auto; }
+#tvl { color: var(--lime); font-size: 27px; text-shadow: var(--shadow); white-space: nowrap; }
+
+#box {
+  width: min(640px, calc(100% - 32px)); margin: 32px auto; overflow: hidden;
+  border-radius: 8px; border: 1px solid #a9c8ef; box-shadow: 0 8px 30px rgba(0,0,0,.7);
+  background: linear-gradient(#0b2f66, #04204d);
+}
+#box.wide { width: min(980px, calc(100% - 32px)); }
+#title {
+  margin: 0; padding: 0 20px; min-height: 46px; line-height: 46px; font-size: 27px; font-weight: 400;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(#cfdbf5 0, #5e89cd 3%, #4b7bbd 12%, #32639e 32%, #1d4e86 52%, #0e4073 70%, #083868 100%);
+  border-bottom: 2px solid #000110; color: var(--lime); text-shadow: var(--shadow);
+}
+#body { padding: 16px 20px 22px; }
+p { margin: 0 0 14px; text-shadow: var(--shadow); }
+.note { color: #aeb9d6; }
+.msg { margin: 0 0 14px; padding: 10px 12px; border-radius: 4px; background: rgba(0,0,0,.25); text-shadow: var(--shadow); }
+.msg.error { color: var(--err); }
+.msg.success { color: var(--ok); }
+h2 { margin: 18px 0 10px; font-size: 24px; font-weight: 400; color: var(--lime); text-shadow: var(--shadow); }
+h2:first-child { margin-top: 0; }
+
+/* ------------------------------------------------------------- fields */
+label, .field { display: block; margin-bottom: 14px; }
+label > span, .field > .lbl { display: block; margin-bottom: 4px; text-shadow: var(--shadow); }
+.field > .check { margin: 0 0 6px; }
+.field-msg { display: block; margin-top: 4px; font-size: 19px; color: var(--err); text-shadow: var(--shadow); }
+input[type=text], input[type=password], input:not([type]) {
+  width: 100%; height: 46px; padding: 0 12px; border-radius: 4px; outline: none;
+  border: 2px solid #5d78cd; background: #e9edf5; color: #14213d;
+  font: 23px var(--font); -webkit-text-stroke: 0;
+}
+input:focus { border-color: var(--lime); box-shadow: 0 0 0 3px var(--lime); }
+.check { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.check input { width: 26px; height: 26px; margin: 0; accent-color: var(--lime); }
+.check > span { margin: 0; }
+.choice { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+
+/* ------------------------------------------------------------ buttons */
+.buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+button, a.btn {
+  min-height: 46px; padding: 0 20px; border: 0; border-radius: 4px; cursor: pointer;
+  background: linear-gradient(#14364c, #18374c); box-shadow: inset 0 1px 0 rgba(120,150,175,.25), 0 0 0 1px #2f5577;
+  color: var(--white); font: 24px/46px var(--font); text-decoration: none; text-shadow: var(--shadow);
+  -webkit-text-stroke: 0.3px currentColor; white-space: nowrap; outline: none;
+}
+button.main { background: linear-gradient(#2a5b86, #1f4a72); }
+button:focus, a.btn:focus, button:hover, a.btn:hover {
+  background: var(--lime); color: var(--ink); text-shadow: none; -webkit-text-stroke: 0;
+}
+button:disabled { opacity: .55; cursor: default; }
+button.small, a.btn.small { display: inline-block; min-height: 38px; padding: 0 12px; font-size: 20px; line-height: 38px; }
+/* one of several (pick() in auth.js) */
+.picks { margin-top: 0; gap: 8px; }
+button.pick[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--lime); color: var(--lime); }
+button.pick[aria-pressed="true"]::before { content: "\2713\00a0"; }
+button.pick[aria-pressed="true"]:focus, button.pick[aria-pressed="true"]:hover { color: var(--ink); }
+button.danger:focus, button.danger:hover { background: #f3b39e; }
+
+/* --------------------------------------------------------------- users */
+.users { width: 100%; border-collapse: collapse; margin-bottom: 18px; border-top: 1px solid #2f5577; }
+.users td { padding: 8px 8px; border-bottom: 1px solid #1c3c63; vertical-align: middle; }
+.users td.acts { text-align: right; }
+.users td.acts .buttons { justify-content: flex-end; margin: 0; gap: 6px; }
+.tag { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 3px; font-size: 18px; line-height: 26px; color: var(--ink); background: var(--lime); text-shadow: none; -webkit-text-stroke: 0; }
+.tag.off { background: #8b93a8; }
+.who { font-size: 19px; color: #aeb9d6; }
+.panel { margin: 0 0 18px; padding: 14px 16px; border-radius: 6px; background: rgba(0,0,0,.25); border: 1px solid #2f5577; }
+.link {
+  display: block; width: 100%; padding: 10px 12px; margin: 6px 0 10px; border-radius: 4px;
+  background: #e9edf5; color: #14213d; font: 19px/1.3 ui-monospace, Consolas, monospace; word-break: break-all;
+  user-select: all; -webkit-text-stroke: 0;
+}
+
+/* a phone (set by fit() in auth.js) */
+html.narrow body { font-size: 20px; }
+html.narrow #box { margin: 16px auto; }
+html.narrow .users tr { display: block; padding: 10px 0; border-bottom: 1px solid #1c3c63; }
+html.narrow .users td { display: block; padding: 4px 0; border: 0; }
+html.narrow .users td.acts { text-align: left; }
+html.narrow .users td.acts .buttons { justify-content: flex-start; }

@@ -9,6 +9,10 @@
  *   On Demand  sign in to Plex (or add a server by address), servers (and their
  *              libraries, shown or hidden), picture quality
  *   Options    subtitle defaults, channel icons, 16:9 mode, squish mode, CORS proxy, erase everything
+ *   Account    who's signed in; saving settings on the server (sync.js) and the
+ *              person's group; change password, manage users (admins), sign out:
+ *              these open the account pages (webui/auth/), leaving the guide.
+ *              Editing a group's settings: which group, and Done
  *
  * Keys: Up/Down (W/S) select · Right (D) / OK into a category's rows ·
  *       Left (A) / Back / Esc / Backspace back out · Back in the categories (or F1) closes
@@ -21,6 +25,7 @@
     { name: "Channels", desc: "Change the channel order, and hide channels you don't watch from the guide." },
     { name: "On Demand", desc: "Sign in to Plex to watch the movies and shows on your media server, show or hide its libraries, and choose the picture quality." },
     { name: "Options", desc: "Subtitles, channel icons, 16:9 mode for widescreen TVs, squish mode for 4:3 TVs, the playlist proxy, the remote control keys, and erasing everything." },
+    { name: "Account", desc: "Who's signed in, and saving your settings on the server for every TV you use. Change your password, sign out, and (for admins) manage people and groups." },
   ];
   const VIS = 7;          // visible rows
   const PITCH = 44;       // row height + gap
@@ -188,8 +193,13 @@
         act: () => { App.setPrefs({ squish: !p.squish }); render(); },
       },
       {
-        text: "CORS Proxy for Playlists", tag: p.proxy ? "On" : "None",
-        info: { title: "CORS Proxy", desc: "Some playlist servers block web pages from downloading them. A CORS proxy can fetch them for you. Not used for video." },
+        text: "CORS Proxy for Playlists", tag: p.proxy ? "On" : U.server.proxy ? "Server's" : "None",
+        info: {
+          title: "CORS Proxy",
+          desc: U.server.proxy
+            ? "This server has its own proxy, used automatically when a playlist or guide can't be downloaded directly. Set a different CORS proxy here only if you need one. Not used for video."
+            : "Some playlist servers block web pages from downloading them. A CORS proxy can fetch them for you. Not used for video.",
+        },
         act: proxyDialog,
       },
       {
@@ -198,17 +208,116 @@
         act: helpDialog,
       },
       {
-        text: "Erase All Settings & Playlists",
-        info: { title: "Erase Everything", desc: "Remove every playlist, the channel order and all options from this browser." },
-        act: () => Dialog.confirm("Erase Everything", "Remove all playlists, channel order and options?", "Erase", async () => {
+        text: Sync.editing ? "Erase This Group's Settings" : "Erase All Settings & Playlists",
+        info: {
+          title: "Erase Everything",
+          desc: Sync.editing ? `Remove every playlist, the channel order and all options from ${Sync.editing.name}'s settings.`
+            : "Remove every playlist, the channel order and all options from this browser" + (Sync.active ? ", and from the copy saved on the server." : "."),
+        },
+        act: () => Dialog.confirm("Erase Everything", "Remove all playlists, channel order and options" + (Sync.editing ? ` from ${Sync.editing.name}'s settings?` : Sync.active ? ", here and on the server?" : "?"), "Erase", async () => {
           await Store.reset();
+          await Sync.flush();
           location.reload();
         }),
       },
     ];
   }
 
-  const rowsFor = (page) => [playlistRows, channelRows, onDemandRows, optionRows][page]();
+  /** Saving settings on the server (sync.js): on or off for this TV. */
+  function syncRow() {
+    const on = Sync.active;
+    const where = U.server.auth
+      ? "Your playlists, channel order, On Demand servers and options are saved to your account, so every TV you sign in on has them"
+      : "Playlists, channel order, On Demand servers and options are saved on the server and shared by every TV on this network";
+    return {
+      text: "Save Settings on Server", tag: !on ? "Off" : Sync.problem ? "Problem" : "On", cls: on && Sync.problem ? "warn" : "",
+      info: {
+        title: "Save Settings on Server", chan: on ? "On" : "Off",
+        desc: (on ? where + ". Screen shape and picture settings stay with each TV."
+          : "Off: this TV keeps its settings to itself. When it's on: " + where.charAt(0).toLowerCase() + where.slice(1) + ".") + (Sync.problem ? " " + Sync.problem : ""),
+      },
+      act: async () => { await Sync.setOn(!on); render(); },
+    };
+  }
+  /** The person's group: an admin looks after its settings. */
+  function groupRow() {
+    const g = Sync.group;
+    if (!g || !Sync.active) return null;
+    const following = Sync.fromGroup || !g.hasSettings;
+    return {
+      text: `Group: ${g.name}`, tag: !g.hasSettings ? "Not Set Up" : following ? "Using" : "Changed",
+      info: {
+        title: `Group: ${g.name}`, chan: following ? "Group settings" : "Your changes",
+        desc: !g.hasSettings ? "An admin hasn't set up this group's settings yet."
+          : following ? "An admin looks after this group's settings. When they update them, your TVs get the update."
+            : `You've changed things since ${g.name}'s settings came. OK goes back to ${g.name}'s settings. They also replace yours the next time an admin updates them.`,
+      },
+      act: following ? null : () => Dialog.confirm(`Use ${g.name}'s Settings`, `Replace your playlists, channel order and options with ${g.name}'s?`, "Replace", async () => {
+        try { await Sync.useGroup(); } catch (e) { Dialog.message(e.message, true); return false; }
+        render();
+      }),
+    };
+  }
+
+  function accountRows() {
+    const s = U.server, u = s.user;
+    const leave = (path) => async () => { await Sync.flush(); location.assign(path); };
+    if (!s.known) {
+      return [{
+        text: "No Accounts Here",
+        info: { title: "No Accounts", desc: "This copy of the viewer isn't running on its own server (docker compose), so there's no sign-in, no saved settings and no stream proxy." },
+      }];
+    }
+    if (Sync.editing) {
+      const g = Sync.editing.name;
+      return [
+        {
+          text: `Editing Group: ${g}`, tag: Sync.problem ? "Problem" : "Saved", cls: Sync.problem ? "warn" : "",
+          info: {
+            title: `Editing ${g}'s Settings`, chan: g,
+            desc: (Sync.problem ? Sync.problem + " " : "") + `Changes you make now are saved as ${g}'s settings, and its people's TVs get them within a few minutes. Your own settings aren't touched. Screen shape and picture settings are this TV's own.`,
+          },
+        },
+        {
+          text: "Done Editing",
+          info: { title: "Done Editing", desc: "Back to the Users page. Your own settings come back the next time you open the TV." },
+          act: leave("/auth/users#groups"),
+        },
+      ];
+    }
+    if (!s.auth) {
+      return [{
+        text: "Sign-In Is Off",
+        info: { title: "Sign-In Is Off", desc: "This server has sign-in turned off (AUTH=off in its .env file), so it only answers devices on its home network." },
+      }, syncRow()];
+    }
+    const name = u ? u.name || u.username : "";
+    return [
+      {
+        text: `Signed In: ${name}`, tag: u && u.admin ? "Admin" : "",
+        info: { title: name, chan: u ? u.username : "", desc: u && u.admin ? "You can add people, put them in groups and set up their TVs in Manage Users." : "Ask an admin if you need another account." },
+      },
+      syncRow(),
+      groupRow(),
+      {
+        text: "Change Password",
+        info: { title: "Change Password", desc: "Opens your account page, where you can choose a new password. Back returns here." },
+        act: leave("/auth/account"),
+      },
+      u && u.admin && {
+        text: "Manage Users",
+        info: { title: "Manage Users", desc: "Add people, send them a link to choose their own password, change or turn off accounts, and sign people out everywhere. Groups: set up the settings once for several people." },
+        act: leave("/auth/users"),
+      },
+      {
+        text: "Sign Out",
+        info: { title: "Sign Out", desc: "Sign out of this TV. Your playlists and settings stay in this browser" + (Sync.active ? ", and saved on the server." : ".") },
+        act: () => Dialog.confirm("Sign Out", `Sign ${name} out of this TV?`, "Sign Out", leave("/auth/logout")),
+      },
+    ].filter(Boolean);
+  }
+
+  const rowsFor = (page) => [playlistRows, channelRows, onDemandRows, optionRows, accountRows][page]();
   const rows = () => rowsFor(M.page);
 
   // ------------------------------------------------------------------ render
@@ -233,7 +342,9 @@
     const nsrc = Store.cfg.vod.sources.length;
     const chan = i === 0 ? `${npl} playlist${npl === 1 ? "" : "s"}`
       : i === 1 ? `${App.all.length} channel${App.all.length === 1 ? "" : "s"}`
-        : i === 2 ? `${nsrc} server${nsrc === 1 ? "" : "s"}` : "";
+        : i === 2 ? `${nsrc} server${nsrc === 1 ? "" : "s"}`
+          : i === 4 && Sync.editing ? Sync.editing.name
+            : i === 4 && U.server.user ? U.server.user.username : "";
     return { title: PAGES[i].name, chan, desc: PAGES[i].desc };
   }
 

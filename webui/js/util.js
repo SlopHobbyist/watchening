@@ -111,20 +111,76 @@
     return s || String(name || "").trim();
   };
 
+  // ---------------------------------------------------------------- server
+  /*
+   * What the server this page came from offers, from its accounts service
+   * (/api/me; see auth/server.mjs). Filled in by U.serverReady before boot.
+   * Served without it (opened from disk, another web server), all stay off.
+   *   auth   sign-in is on        user   who's signed in { username, name, admin }
+   *   proxy  MediaFlow Proxy's path ("/proxy/"): streams, playlists and icons
+   *          from http:// on an https:// page, and servers that block web
+   *          pages (CORS). nginx adds its password.
+   */
+  U.server = { known: false, auth: false, user: null, proxy: "" };
+  U.serverReady = (async () => {
+    try {
+      const res = await fetch("/api/me", { cache: "no-store", headers: { Accept: "application/json" } });
+      if (res.ok) {
+        const d = await res.json();
+        Object.assign(U.server, { known: true, auth: !!d.auth, user: d.user || null, proxy: d.streamProxy || "" });
+      }
+    } catch { /* no accounts service here */ }
+    return U.server;
+  })();
+  /** A session that ended while the app was open (expired, or an admin signed
+   *  this person out) goes back to the sign-in page, checked now and then and
+   *  whenever the page comes back into view. */
+  U.checkSignIn = async () => {
+    if (!U.server.auth) return;
+    try {
+      const res = await fetch("/api/me", { cache: "no-store", headers: { Accept: "application/json" } });
+      const d = res.ok ? await res.json() : null;
+      if (d && d.auth && !d.user) location.assign("/auth/login?return_to=" + location.pathname + location.search);
+    } catch { /* offline: try again later */ }
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) U.checkSignIn(); });
+  setInterval(U.checkSignIn, 10 * 60e3);
+
+  /** Browsers block http:// media and downloads on an https:// page. */
+  U.mixed = (url) => location.protocol === "https:" && /^http:/i.test(String(url));
+  /** `url` through the server's stream proxy. kind: "hls" playlists are
+   *  rewritten so their segments come through it too, "dash" becomes HLS,
+   *  anything else ("stream") is passed through as is. Absolute: mpegts.js
+   *  fetches from a worker (a blob: URL), where a relative one doesn't resolve. */
+  U.proxied = (url, kind) =>
+    new URL(U.server.proxy + (kind === "hls" ? "hls/manifest.m3u8" : kind === "dash" ? "mpd/manifest.m3u8" : "stream") +
+      "?d=" + encodeURIComponent(url), location.href).href;
+  /** An image's address: through the proxy where the page can't load it itself. */
+  U.mediaUrl = (url) => (url && U.server.proxy && U.mixed(url) ? U.proxied(url) : url);
+
   // ----------------------------------------------------------------- fetch
   /** Fetch text, transparently gunzipping .gz payloads. `proxy` is an optional
-   *  CORS proxy prefix; "{url}" in it is replaced with the encoded URL. */
+   *  CORS proxy prefix; "{url}" in it is replaced with the encoded URL. Without
+   *  one, the server's stream proxy is used where needed: for http:// on an
+   *  https:// page, and to retry a download the browser was refused (CORS). */
   U.fetchText = async (url, proxy) => {
     let target = url;
     // files on this server (the zlive guide) never need the proxy
     let local = false;
     try { local = new URL(url, location.href).origin === location.origin; } catch {}
+    const ours = !local && !proxy && U.server.proxy;
     if (proxy && !local) target = proxy.includes("{url}") ? proxy.replace("{url}", encodeURIComponent(url)) : proxy + url;
+    else if (ours && U.mixed(url)) target = U.proxied(url);
     let res;
     try {
       res = await fetch(target, { cache: "no-cache" });
     } catch (e) {
-      throw new Error("Couldn't reach the server (offline, bad URL, or blocked by CORS)");
+      if (!ours || target !== url) throw new Error("Couldn't reach the server (offline, bad URL, or blocked by CORS)");
+      try {
+        res = await fetch(U.proxied(url), { cache: "no-cache" });
+      } catch {
+        throw new Error("Couldn't reach the server, directly or through this server's proxy");
+      }
     }
     if (!res.ok) throw new Error(`The server answered ${res.status} ${res.statusText || ""}`.trim());
     const buf = await res.arrayBuffer();

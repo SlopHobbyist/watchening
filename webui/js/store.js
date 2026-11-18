@@ -3,10 +3,13 @@
  *   Store.cfg      small settings object, kept in localStorage
  *   Store.get/put  large blobs (playlist and XMLTV text) in IndexedDB, since
  *                  IPTV playlists easily outgrow localStorage's ~5MB.
+ * On a server with accounts, sync.js also saves cfg there (Store.onSave), all
+ * but the parts that belong to one TV (DEVICE below).
  *
  * cfg = {
- *   playlists: [{ id, name, type: "url"|"file"|"zlive", url, enabled, count, updated, error }],
- *              (at most one "zlive": zlive.st's channels, see zlive.js)
+ *   playlists: [{ id, name, type: "url"|"file"|"zlive", url, enabled, count, updated, error, file }],
+ *              (at most one "zlive": zlive.st's channels, see zlive.js;
+ *               file: an uploaded playlist's copy on the server, see sync.js)
  *   order:  [channel keys]   custom channel order (keys: "<playlist id>|<stream url>")
  *   hidden: [channel keys]
  *   prefs:  { epgUrl, ccDefault, ccSize, proxy, chanIcons, squish, wide }
@@ -19,6 +22,10 @@
  *           quality, views: { "<source id>:<library id>": view id },
  *           hiddenLibs: ["<source id>:<library id>"] (left out of On Demand) }
  * }
+ *
+ * Editing a group's settings (/?group=<id>, admins; see sync.js): cfg holds the
+ * group's settings, and only this TV's own parts (DEVICE) are kept in
+ * localStorage, so the admin's own settings stay as they were.
  */
 (function () {
   "use strict";
@@ -34,19 +41,45 @@
     screenCh: {},    // channel key -> screen options of its own
     vod: { clientId: "", sources: [], quality: "original", views: {}, hiddenLibs: [] },
   });
+  /** What belongs to this TV, not to the person: the screen's shape and
+   *  picture settings, the last channel, the Plex device id. */
+  const DEVICE = { top: ["last", "screen", "screenCh"], prefs: ["squish", "wide"], vod: ["clientId"] };
+  const editing = new URLSearchParams(location.search).get("group") || "";
 
-  function load() {
+  /** A saved cfg (from storage or the server) made whole. */
+  function normalize(saved) {
     const cfg = DEFAULTS();
-    try {
-      const saved = JSON.parse(localStorage.getItem(KEY) || "null");
-      if (saved && typeof saved === "object") {
-        Object.assign(cfg, saved);
-        cfg.prefs = Object.assign(DEFAULTS().prefs, saved.prefs || {});
-        if (cfg.prefs.squish) cfg.prefs.wide = false; // squish mode turns 16:9 mode off
-        cfg.vod = Object.assign(DEFAULTS().vod, saved.vod || {});
-      }
-    } catch { /* storage blocked or corrupt: start fresh */ }
+    if (saved && typeof saved === "object") {
+      Object.assign(cfg, saved);
+      cfg.prefs = Object.assign(DEFAULTS().prefs, saved.prefs || {});
+      if (cfg.prefs.squish) cfg.prefs.wide = false; // squish mode turns 16:9 mode off
+      cfg.vod = Object.assign(DEFAULTS().vod, saved.vod || {});
+    }
     return cfg;
+  }
+  /** The parts of `cfg` that belong to this TV. */
+  function deviceParts(cfg) {
+    const out = { prefs: {}, vod: {} };
+    for (const k of DEVICE.top) if (cfg[k] !== undefined) out[k] = cfg[k];
+    for (const k of DEVICE.prefs) if (cfg.prefs && cfg.prefs[k] !== undefined) out.prefs[k] = cfg.prefs[k];
+    for (const k of DEVICE.vod) if (cfg.vod && cfg.vod[k] !== undefined) out.vod[k] = cfg.vod[k];
+    return out;
+  }
+  /** `cfg` with this TV's parts from `dev` laid over it. */
+  function withDevice(cfg, dev) {
+    for (const k of DEVICE.top) if (dev[k] !== undefined) cfg[k] = dev[k];
+    Object.assign(cfg.prefs, dev.prefs || {});
+    Object.assign(cfg.vod, dev.vod || {});
+    if (cfg.prefs.squish) cfg.prefs.wide = false;
+    return cfg;
+  }
+
+  function readLocal() {
+    try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch { return null; } // blocked or corrupt
+  }
+  function load() {
+    const saved = readLocal();
+    return editing ? withDevice(normalize(null), deviceParts(normalize(saved))) : normalize(saved);
   }
 
   // ------------------------------------------------------------- IndexedDB
@@ -83,14 +116,40 @@
 
   const Store = {
     cfg: load(),
+    /** The group whose settings are being edited (an id), or "". */
+    editing,
+    /** Called after every save (sync.js sends the change to the server). */
+    onSave: null,
     save() {
-      try { localStorage.setItem(KEY, JSON.stringify(this.cfg)); } catch { /* ignore */ }
+      this.saveLocal();
+      if (this.onSave) this.onSave();
+    },
+    /** Save in this browser only. */
+    saveLocal() {
+      let out = this.cfg;
+      if (editing) out = withDevice(normalize(readLocal()), deviceParts(this.cfg));
+      try { localStorage.setItem(KEY, JSON.stringify(out)); } catch { /* ignore */ }
+    },
+    /** Take settings from the server, keeping this TV's own parts. */
+    adopt(saved) {
+      const dev = deviceParts(this.cfg);
+      const next = withDevice(normalize(saved), dev);
+      for (const k of Object.keys(this.cfg)) delete this.cfg[k];
+      Object.assign(this.cfg, next); // the same object: other files hold on to Store.cfg
+      this.saveLocal();
     },
     reset() {
+      if (editing) {
+        // a group's settings: back to empty, leaving this TV alone
+        this.adopt(null);
+        this.save();
+        return Promise.resolve();
+      }
       this.cfg = DEFAULTS();
       this.save();
       return tx("readwrite", (s) => s.clear(), () => mem.clear());
     },
+    DEVICE,
     get(k) { return tx("readonly", (s) => s.get(k), () => mem.get(k)); },
     put(k, v) { return tx("readwrite", (s) => s.put(v, k), () => mem.set(k, v)); },
     del(k) { return tx("readwrite", (s) => s.delete(k), () => mem.delete(k)); },

@@ -7,6 +7,11 @@
  *   unknown          tries native, then HLS, then MPEG-TS
  *   embed            zlive channels: the provider's own player in an iframe
  *                    (live only: no pause, seeking or subtitles; mute reloads it)
+ *   MPEG-DASH        only through the server's stream proxy, which turns it into HLS
+ *
+ * When the server has a stream proxy (MediaFlow, see U.server), a stream that
+ * won't play directly is tried again through it, and an http:// stream on an
+ * https:// page only plays through it (see playPlan).
  *
  * On Demand titles (see ondemand.js) come in as channels with `vod` set:
  * `start` is where to begin (seconds) and `dur` the running time, used when
@@ -58,6 +63,7 @@
   const P = (window.Player = {
     ch: null,
     how: "",          // native | hls | ts | flv | embed
+    proxied: false,   // playing through the server's stream proxy
     frame: null,      // the <iframe> playing an embed channel
     live: false,
     loading: false,
@@ -219,6 +225,7 @@
     if (P.frame) { P.frame.remove(); P.frame = null; }
     P.live = false;
     P.how = "";
+    P.proxied = false;
   }
 
   /** One way of playing `url`; resolves once the first frame is decoded. */
@@ -341,30 +348,29 @@
     if (ch.embed) return startEmbed(ch, my);
     const url = await resolveUrl(ch.url);
     if (my !== P.token) return;
-    const k = kind(url);
-    let chain = CHAINS[k];
-    // The <video> element isn't subject to CORS, so where the browser plays HLS
-    // itself it rescues streams hls.js can't fetch: servers without CORS
-    // headers, or that redirect without them (jmp2.uk, many ad-stitched feeds).
-    if (k === "hls" && video.canPlayType("application/vnd.apple.mpegurl")) chain = ["hls", "native"];
+    const plan = playPlan(url);
     const errs = [];
-    let retried = false;
-    for (let i = 0; i < chain.length; i++) {
-      const how = chain[i];
+    let retried = false, skipDirect = false;
+    for (let i = 0; i < plan.length; i++) {
+      const { how, src, proxied } = plan[i];
+      if (skipDirect && !proxied) continue;
       const t0 = Date.now();
       try {
-        await attempt(how, url, my);
+        P.proxied = proxied;
+        await attempt(how, src, my);
         if (my === P.token) { P.loading = false; emit("state"); }
         return;
       } catch (e) {
         if (my !== P.token) return;
-        errs.push({ how, msg: (e && e.message) || "" });
+        errs.push({ how, proxied, msg: (e && e.message) || "" });
         teardown();
         if (e && e.transient && !retried) { retried = true; i--; continue; }
         // a server that never answered won't answer the next engine either
+        // (but may answer the proxy, from the server's network)
         if (Date.now() - t0 > 15000) {
-          errs.unshift({ how, msg: "The stream's server isn't answering (it may be down, or blocked on your network)" });
-          break;
+          errs.unshift({ how, proxied, msg: "The stream's server isn't answering (it may be down, or blocked on your network)" });
+          if (proxied) break;
+          skipDirect = true;
         }
       }
     }
@@ -372,12 +378,40 @@
     // native playback only ever says "can't play this format"; the
     // libraries' reasons are more useful
     const best = errs.find((e) => e.how !== "native" && e.msg) || errs.find((e) => e.msg);
-    let err = k === "dash" ? "MPEG-DASH (.mpd) streams aren't supported" : best ? best.msg : "This stream can't be played";
-    if (location.protocol === "https:" && /^http:/i.test(ch.url)) {
-      err = "This channel uses http:// and the viewer was opened over https://, which browsers block. Open the viewer over http:// instead.";
+    let err = best ? best.msg : "This stream can't be played";
+    if (kind(url) === "dash" && !U.server.proxy) err = "MPEG-DASH (.mpd) streams aren't supported";
+    if (U.mixed(url) && !U.server.proxy) {
+      err = "This channel uses http://, which browsers block on an https:// page, and this server has no stream proxy. Open the viewer over http:// instead.";
     }
     fail(err);
   };
+
+  /**
+   * The ways to try playing `url`, in order: [{ how, src, proxied }].
+   * Directly first, by its type's engines; then through the server's stream
+   * proxy (MediaFlow), which reaches servers that don't allow web pages
+   * (CORS), plays MPEG-DASH as HLS, and is the only way to an http:// stream
+   * from an https:// page.
+   */
+  function playPlan(url) {
+    const k = kind(url);
+    let chain = CHAINS[k];
+    // The <video> element isn't subject to CORS, so where the browser plays HLS
+    // itself it rescues streams hls.js can't fetch: servers without CORS
+    // headers, or that redirect without them (jmp2.uk, many ad-stitched feeds).
+    if (k === "hls" && video.canPlayType("application/vnd.apple.mpegurl")) chain = ["hls", "native"];
+    const plan = U.mixed(url) ? [] : chain.map((how) => ({ how, src: url, proxied: false }));
+    if (U.server.proxy) {
+      // the proxy's answers come from this site, so CORS is no problem and
+      // native HLS has nothing to rescue
+      const via = k === "dash" ? ["hls"] : k === "hls" ? ["hls"] : CHAINS[k];
+      for (const how of via) {
+        const as = k === "dash" ? "dash" : how === "hls" ? "hls" : "stream";
+        plan.push({ how, src: U.proxied(url, as), proxied: true });
+      }
+    }
+    return plan;
+  }
   P.retry = () => P.ch && P.load(P.ch);
   P.stop = () => P.load(null);
 

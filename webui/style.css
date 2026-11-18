@@ -677,3 +677,11 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
   background: linear-gradient(#3a5279 0, #283962 50%, #1b2651 100%); border-top: 1px solid #7f8796;
   font-size: 18px; color: #c3cde0; text-shadow: var(--shadow);
 }
+
+/* Editing a group's settings (sync.js): a strip across the top of the window. */
+#editing {
+  position: fixed; left: 50%; top: 0; z-index: 50; transform: translateX(-50%);
+  max-width: 96vw; padding: 4px 16px; border-radius: 0 0 6px 6px;
+  background: var(--lime); color: #1e1f1c; font: 18px/24px var(--font);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}

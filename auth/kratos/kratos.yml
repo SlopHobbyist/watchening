@@ -1,0 +1,85 @@
+# Ory Kratos: accounts and sign-in (https://www.ory.sh/docs/kratos).
+#
+# This file holds the settings that are the same on every install. The ones
+# that depend on the site's address, and the secrets, are written by the setup
+# service (auth/setup.mjs) into a second file loaded after this one. Change the
+# address in .env, not there.
+#
+# Accounts are invite-only: there is no public sign-up. The first start makes
+# an admin account (see data/admin-login.txt); admins add everyone else from
+# the Users page.
+
+version: v26.2.0
+
+dsn: sqlite:///var/lib/sqlite/kratos.sqlite?_fk=true&mode=rwc
+
+serve:
+  public:
+    port: 4433
+    cors:
+      enabled: false        # the sign-in pages are on the same address
+  admin:
+    port: 4434              # only reachable inside the compose network
+
+selfservice:
+  methods:
+    password:
+      enabled: true
+      config:
+        min_password_length: 8
+        identifier_similarity_check_enabled: true
+        haveibeenpwned_enabled: true     # rejects passwords found in known breaches
+    # one-time links that let an invited (or locked-out) person set a password
+    link:
+      enabled: true
+      config:
+        lifespan: 72h
+    code:
+      enabled: false
+    profile:
+      enabled: false          # usernames and names are changed by an admin
+  flows:
+    login:
+      lifespan: 1h
+    registration:
+      enabled: false
+    recovery:
+      enabled: true
+      use: link
+      notify_unknown_recipients: false
+    verification:
+      enabled: false
+    settings:
+      privileged_session_max_age: 15m
+      required_aal: highest_available
+
+session:
+  lifespan: 2160h               # a TV stays signed in for 90 days (Users > Sign Out ends it sooner)
+  cookie:
+    name: watchening_session
+    same_site: Lax
+
+ciphers:
+  algorithm: xchacha20-poly1305
+
+hashers:
+  algorithm: bcrypt
+  bcrypt:
+    cost: 12
+
+identity:
+  default_schema_id: user
+  schemas:
+    - id: user
+      url: file:///etc/config/kratos/identity.schema.json
+
+# Nothing is emailed (there are no email addresses), but Kratos wants a mail
+# server configured. This one is never contacted.
+courier:
+  smtp:
+    connection_uri: smtp://unused:unused@127.0.0.1:2525/?disable_starttls=true
+
+log:
+  level: info
+  format: text
+  leak_sensitive_values: false

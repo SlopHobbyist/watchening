@@ -266,7 +266,7 @@
       img.loading = "lazy";
       img.decoding = "async";
       img.onerror = () => img.remove();
-      img.src = ch.logo;
+      img.src = U.mediaUrl(ch.logo);
       c.appendChild(img);
     }
     const num = document.createElement("div");
@@ -1742,12 +1742,41 @@
     }
   }, 1000);
 
+  /** Settings that arrived from the server while running (sync.js): load the
+   *  playlists and guide again. `sources`: the On Demand servers changed. */
+  App.reloadData = async function (sources) {
+    App.data.clear();
+    await Promise.all(Store.cfg.playlists.map((pl) => App.loadPlaylist(pl, false)));
+    App.setPrefs({});
+    App.rebuild();
+    if (sources) OnDemand.changed();
+    const stale = Store.cfg.playlists.filter((pl) => isWeb(pl) && pl.enabled && (!App.data.has(pl.id) || !pl.updated));
+    if (stale.length) {
+      await Promise.all(stale.map((pl) => App.loadPlaylist(pl, true)));
+      Store.saveLocal();
+      App.rebuild();
+    }
+    App.loadGuideData(false);
+  };
+
+  /** Editing a group's settings (sync.js): say so on screen the whole time. */
+  function showEditing() {
+    const el = document.createElement("div");
+    el.id = "editing";
+    el.textContent = `Editing ${Sync.editing.name}'s settings · Settings > Account > Done to finish`;
+    document.body.appendChild(el);
+    document.title = `${Sync.editing.name}: Settings · TV Listings`;
+  }
+
   // -------------------------------------------------------------------- boot
   async function boot() {
     App.setPrefs({});
     fit();
     renderClock();
     lastMinute = Math.floor(Date.now() / MIN);
+    await U.serverReady; // sign-in and the stream proxy, before anything plays
+    await Sync.ready;    // settings saved on the server, if they're newer
+    if (Sync.editing) showEditing();
     await Promise.all(Store.cfg.playlists.map((pl) => App.loadPlaylist(pl, false)));
     App.rebuild();
     if (N()) {
