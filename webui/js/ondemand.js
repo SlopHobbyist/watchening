@@ -520,9 +520,18 @@
       onInput: () => kbSearch(lv),
       onGo: () => kbGo(lv),
       onBack: () => { clearTimeout(lv.timer); back(); },
+      hint: () => kbHint(lv),
     });
     OD.stack.push(lv);
     render();
+  }
+
+  /** For Voice: titles seen on the way here and found by earlier searches. */
+  function kbHint(lv) {
+    const titles = [];
+    for (const l of OD.stack) for (const r of l.rows) if (r.item && r.item.title) titles.push(r.item.title);
+    for (const res of lv.got.values()) for (const it of res.items) titles.push(it.title);
+    return Voice.hint(titles.reverse()); // the latest first, if they don't all fit
   }
 
   /** Search for what's typed, once typing pauses; one already made shows at once. */
@@ -584,7 +593,7 @@
     if (!q) {
       info = {
         title: `Search ${lib.title}`, chan,
-        desc: "Type part of a title, here or on a keyboard. What matches shows here as you type; Search lists it.",
+        desc: `Type part of a title, here or on a keyboard${Keyboard.voice ? ", or say it with Voice" : ""}. What matches shows here as you type; Search lists it.`,
       };
     } else if (lv.err) info = { title, chan: "Not Available", desc: `${lv.err}. Type again to try again.` };
     else if (!lv.res) info = { title, chan, desc: "Searching..." };

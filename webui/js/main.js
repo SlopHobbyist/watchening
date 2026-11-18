@@ -509,6 +509,7 @@
         onInput: (q) => { f.hits = findChannels(q); findShow(); },
         onGo: showFound,
         onBack: closeFind,
+        hint: () => Voice.hint(App.channels.map((c) => c.name)),
       });
     }
     S.find.typing = true;
@@ -539,7 +540,7 @@
     const f = S.find, q = f.s.q.trim(), n = f.hits.length;
     Keyboard.status(q ? chans(n) : "", { canGo: n > 0 });
     App.showInfo(!q
-      ? { title: "Search Channels", desc: "Type part of a channel's name, or its number, here or on a keyboard. What matches shows here as you type; Search shows it in the guide." }
+      ? { title: "Search Channels", desc: `Type part of a channel's name, or its number, here or on a keyboard${Keyboard.voice ? ", or say it with Voice" : ""}. What matches shows here as you type; Search shows it in the guide.` }
       : {
         title: `"${q}"`, chan: chans(n),
         desc: n ? f.hits.slice(0, 24).map((i) => `${App.channels[i].n} ${App.channels[i].call}`).join(", ") : "No channel matches.",

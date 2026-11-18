@@ -42,6 +42,14 @@ proxy ([MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy)). That
 covers an `http://` stream on an `https://` site, a server that blocks web
 pages, and MPEG-DASH.
 
+The on-screen keyboard's **Voice** key searches by talking. What's said is
+turned into text on your own server, on its CPU, by one of
+[FUTO's voice input models](https://keyboard.futo.tech/voice-input-models)
+(`SPEECH_MODEL` in `.env`); nothing is sent anywhere else, and nothing is kept.
+Browsers only allow the microphone on an `https://` address (or
+`http://localhost`), and the page only sends recordings over those, so the
+Voice key appears only there.
+
 Saved settings, groups and uploaded playlists are kept in `data/settings/`.
 
 Putting it on the internet behind a reverse proxy: see

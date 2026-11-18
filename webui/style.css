@@ -442,6 +442,21 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
 .kb-key.sel { border-color: #fffde4; background: #f3f0a2; color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }
 .kb-key.sel.off { color: #6b6f52; }
 
+/* Voice (keyboard.js): a microphone by its name; while it listens, a lime
+   border and a bar along the bottom that follows how loud it hears you, and
+   the field shows what to do in place of what's typed. */
+.kb-key.voice { position: relative; gap: 7px; }
+.kb-key.voice svg { flex: none; width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.kb-key.voice::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: 5px; height: 3px; border-radius: 2px;
+  background: var(--lime); transform: scaleX(var(--lvl, 0)); transform-origin: left;
+}
+#kb.listening .kb-key.voice { border-color: var(--lime); }
+#kb.listening .kb-key.voice.sel { border-color: #fffde4; }
+#kb.listening .kb-key.voice.sel::after { background: #1e1f1c; }
+#kb.listening #kb-q, #kb.listening #kb-caret { display: none; }
+#kb.listening #kb-ph { display: block; }
+
 /* -------------------------------------------------------------- settings */
 /* Full screen: header, title bar, category column beside the rows (like the
    guide's channel column beside its listings), info panel, key hints. */

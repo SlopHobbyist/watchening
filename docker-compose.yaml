@@ -19,6 +19,8 @@
 #              runs the Users page, makes the first admin
 #   mediaflow  MediaFlow Proxy: plays http:// streams on an https:// page, and
 #              streams whose servers don't allow web pages
+#   speech     voice search: whisper.cpp with FUTO's voice input models, on
+#              the CPU (no GPU needed)
 #
 # Only webui is published on a port. Each browser keeps its own playlists and
 # settings; accounts only decide who can open the site.
@@ -192,8 +194,36 @@ services:
       start_period: 20s
     <<: *logging
 
+  # Voice search, at /stt (nginx). The on-screen keyboard's Voice key records
+  # a short clip in the browser and sends it here over the page's https://
+  # connection; it's turned into text in memory and nothing is kept. The
+  # model (one of FUTO's, see speech/start.sh) is downloaded on the first
+  # start, 45 MB for english-39. This image is amd64; on an arm64 server use
+  # main-arm64-<the same commit> instead.
+  speech:
+    image: ghcr.io/ggml-org/whisper.cpp:main-aba02defd6bb6ff5de63721c21e3456645c153e2
+    container_name: watchening-speech
+    restart: unless-stopped
+    entrypoint: ["sh", "/speech/start.sh"]
+    environment:
+      SPEECH_MODEL: "${SPEECH_MODEL:-english-39}"
+      SPEECH_THREADS: "${SPEECH_THREADS:-4}"
+      SPEECH_LANGUAGE: "${SPEECH_LANGUAGE:-}"
+    volumes:
+      - ./speech:/speech:ro
+      - speech-models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 2m   # the first start downloads the model
+      start_interval: 2s
+    <<: *logging
+
 volumes:
   epg:           # the finished guide, shared with nginx
   epg-work:      # last run's listings and which sites have been failing
   auth-secrets:  # made on the first start: Kratos's keys, MediaFlow's password
   kratos-db:     # accounts (SQLite)
+  speech-models: # FUTO's voice input model, downloaded on the first start

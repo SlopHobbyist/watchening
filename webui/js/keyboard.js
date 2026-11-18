@@ -9,6 +9,11 @@
  * ◀▶ wrap around a row. Going down onto Space and back up returns to the
  * same column. Letters come out capitalized at the start of a word.
  *
+ * Voice, under Search (where the microphone can be used, see voice.js):
+ * listens until the talking stops, then puts what was said in the field in
+ * place of what's there and moves to Search. While it listens, OK on Voice
+ * is "done talking", Back stops listening, and typing types instead.
+ *
  * A keyboard's own keys type too (letters, WASD included); arrows and a
  * remote move over the on-screen keys. Enter searches right after typing on
  * a keyboard, and presses the highlighted key otherwise (a remote's OK).
@@ -18,7 +23,8 @@
  * (two class changes), typing only changes the field's text. What the owner
  * draws in response is up to it.
  *
- *   const s = Keyboard.session({ onInput(q), onGo(q), onBack() })
+ *   const s = Keyboard.session({ onInput(q), onGo(q), onBack(), hint() })
+ *                                hint: names likely to be said, for Voice
  *   Keyboard.show(parentEl, s)   put it on screen in parentEl, as s left it
  *   Keyboard.hide()
  *   Keyboard.key(e)              a key while it's showing -> handled
@@ -26,16 +32,27 @@
  *   Keyboard.status(note, { pending, canGo })
  *                                the field's note ("4 Matches"), dimmed while
  *                                pending; Search dims when it can't go
+ *   Keyboard.voice               there's a Voice key
  */
 (function () {
   "use strict";
+  const VOICE = !!(window.Voice && Voice.available);
   const ROWS = [
     [..."1234567890", { act: "del", label: "Delete" }],
     [..."QWERTYUIOP", { act: "clear", label: "Clear" }],
     [..."ASDFGHJKL'", { act: "go", label: "Search" }],
-    [..."ZXCVBNM", { act: "space", label: "Space", span: 4 }],
+    VOICE
+      ? [..."ZXCVBNM", { act: "space", label: "Space", span: 3 }, { act: "voice", label: "Voice" }]
+      : [..."ZXCVBNM", { act: "space", label: "Space", span: 4 }],
   ];
   const COLS = 11, MAX = 40;
+  const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5"/><path d="M5,11 a7,7 0 0 0 14,0 M12,18 V21.5"/></svg>';
+  // Voice's notes, in the field's note spot while they apply
+  const SAID = {
+    listening: "Listening...", working: "Working...", none: "Didn't Catch That",
+    blocked: "Microphone Blocked", nomic: "No Microphone", busy: "Microphone in Use",
+    signin: "Sign In Again", server: "Voice Not Available",
+  };
 
   function div(cls, text, id) {
     const d = document.createElement("div");
@@ -65,12 +82,14 @@
       const span = o.span || 1;
       const key = Object.assign({ r, c0: c, c1: c + span - 1 }, o);
       key.el = div("kb-key" + (o.act ? " act" : ""), o.label);
+      if (o.act === "voice") { key.el.classList.add("voice"); key.el.insertAdjacentHTML("afterbegin", MIC); }
       if (span > 1) key.el.style.gridColumn = `span ${span}`;
       const i = keys.push(key) - 1;
       key.el.addEventListener("click", () => {
         if (!cur) return;
         cur.typed = false;
         select(i);
+        if (vo && key.act !== "voice") stopVoice();
         press(i, false);
       });
       keysEl.appendChild(key.el);
@@ -79,10 +98,14 @@
     }
   });
   const goKey = keys[grid[2][10]];
+  const voiceKey = VOICE ? keys[grid[3][10]] : null;
 
   // ----------------------------------------------------------------- state
   let cur = null;    // the session showing
   let selKey = -1;   // the key with the highlight
+  let vo = null;     // Voice listening: { s: the session }
+  let said = "", saidTimer = 0;      // Voice's note, while it shows
+  let note = "", notePending = false; // the owner's note (status)
 
   function session(o) {
     return Object.assign({
@@ -90,18 +113,21 @@
       ki: grid[1][0], goal: 0,  // the highlighted key (Q to start); the column ▲▼ aim for
       typed: false,             // the last key was typed on a keyboard (then Enter searches)
       placeholder: "Type a name",
-      onInput() {}, onGo() {}, onBack() {},
+      onInput() {}, onGo() {}, onBack() {}, hint: null,
     }, o);
   }
 
   function show(parent, s) {
+    if (vo && vo.s !== s) stopVoice();
+    if (cur !== s) sayNote("");
     cur = s;
     if (root.parentNode !== parent) parent.appendChild(root);
-    phEl.textContent = s.placeholder;
     select(s.ki);
     drawField();
   }
   function hide() {
+    stopVoice();
+    sayNote("");
     cur = null;
     root.remove();
   }
@@ -134,6 +160,7 @@
       case "clear": return edit("");
       case "space": return type(" ");
       case "go": return go();
+      case "voice": return voice();
     }
     type(/[A-Z]/.test(k.ch) && !/(^|\s)$/.test(cur.q) ? k.ch.toLowerCase() : k.ch);
   }
@@ -152,23 +179,96 @@
     if (cur.q.trim()) cur.onGo(cur.q);
   }
 
+  // ----------------------------------------------------------------- voice
+  /** Voice: start listening, or, while listening, done talking. */
+  function voice() {
+    if (vo) return Voice.stop();
+    const s = cur, v = (vo = { s });
+    let hint = "";
+    try { hint = typeof s.hint === "function" ? s.hint() : s.hint || ""; } catch (e) { /* no hint, then */ }
+    drawVoice("listening");
+    Voice.listen({
+      hint,
+      onState: (st) => { if (vo === v) drawVoice(st); },
+      onLevel: (l) => { if (vo === v) voiceKey.el.style.setProperty("--lvl", l.toFixed(2)); },
+    }).then(
+      (text) => {
+        if (vo !== v) return;
+        endVoice();
+        if (!text) return sayNote(SAID.none, 3000);
+        sayNote("");
+        edit(text.slice(0, MAX).trim());
+        select(keys.indexOf(goKey)); // OK searches for it
+        cur.goal = goKey.c0;
+      },
+      (e) => {
+        if (vo !== v) return;
+        endVoice();
+        if (e.code !== "cancel") sayNote(SAID[e.code] || SAID.server, 4000);
+      },
+    );
+  }
+  /** Stop listening, dropping what was said. */
+  function stopVoice() {
+    if (!vo) return;
+    endVoice();
+    Voice.cancel();
+    sayNote("");
+  }
+  function endVoice() {
+    vo = null;
+    root.classList.remove("listening");
+    if (voiceKey) voiceKey.el.style.setProperty("--lvl", "0");
+    drawField();
+  }
+  function drawVoice(st) {
+    root.classList.add("listening");
+    phEl.textContent = st === "working" ? "One moment" : "Say what to search for";
+    sayNote(SAID[st]);
+    nEl.classList.toggle("pending", st === "working");
+  }
+
+  /** Voice's note in place of the owner's, for ms (or until cleared). */
+  function sayNote(text, ms) {
+    clearTimeout(saidTimer);
+    said = text;
+    if (text && ms) saidTimer = setTimeout(() => sayNote(""), ms);
+    drawNote();
+  }
+  function drawNote() {
+    nEl.textContent = said || note;
+    nEl.classList.toggle("pending", !said && notePending);
+  }
+
   function drawField() {
+    if (!cur) return;
+    if (!vo) phEl.textContent = cur.placeholder;
     qEl.textContent = cur.q;
     field.classList.toggle("empty", !cur.q);
     if (cur.q.length > 20) qEl.scrollLeft = qEl.scrollWidth; // keep the end in view
   }
 
-  function status(note, o) {
+  function status(n, o) {
     o = o || {};
-    nEl.textContent = note || "";
-    nEl.classList.toggle("pending", !!o.pending);
+    note = n || "";
+    notePending = !!o.pending;
+    if (!vo) drawNote();
     goKey.el.classList.toggle("off", !cur || !cur.q.trim() || o.canGo === false);
   }
 
   function key(e) {
     if (!cur) return false;
     const k = e.key, s = cur;
-    if (k.length === 1 && /[\p{L}\p{N}\p{P}\p{S} ]/u.test(k)) {
+    const ch = k.length === 1 && /[\p{L}\p{N}\p{P}\p{S} ]/u.test(k);
+    if (vo) {
+      // listening: Back stops it, OK on Voice is done talking, ▲▼◀▶ move,
+      // typing or OK on another key stops it and does what it does
+      const n = ch ? null : U.nav(e);
+      if (n === "back" || k === "Delete" || k === "Clear") { if (!e.repeat) stopVoice(); return true; }
+      if (n === "ok" && keys[s.ki].act === "voice") { if (!e.repeat) Voice.stop(); return true; }
+      if (ch || n === "ok") stopVoice();
+    }
+    if (ch) {
       s.typed = true;
       type(k);
       return true;
@@ -199,5 +299,6 @@
     move: (d) => cur && move(Math.sign(d), 0),
     isShowing: (s) => !!cur && (!s || cur === s),
     hint: "▲▼◀▶ Select · OK Type · Back Previous Menu",
+    voice: VOICE,
   };
 })();
