@@ -81,3 +81,6 @@ trademarks of their owners. They're used here only to identify the channels,
 and Watchening isn't affiliated with or endorsed by any of them. The same goes
 for Plex, Jellyfin and zlive.st, which Watchening connects to but doesn't
 include.
+
+> [!NOTE]
+> Watchening doesn't host, provide or distribute any TV channels, shows or movies. It's only a player: everything it plays comes from sources you set up yourself, such as your own IPTV playlists or your Plex or Jellyfin servers. Watchening doesn't run or control any of those sources. Make sure you have the right to watch what you play.
