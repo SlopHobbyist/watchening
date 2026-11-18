@@ -19,8 +19,7 @@ A cable box simulator! Watch IPTV and Plex/Jellyfin with a classic cable aesthet
 
 ### First launch
 
-Install [Docker](https://docs.docker.com/get-docker/) first (Engine 26 or
-newer, with Compose v2). Then:
+Install [Docker](https://docs.docker.com/get-docker/) first (Engine 26 or newer, with Compose v2). Then:
 
 ```sh
 git clone https://github.com/SlopHobbyist/watchening
