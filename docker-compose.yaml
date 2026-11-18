@@ -25,8 +25,8 @@
 #              with every stream relayed through this server
 #
 # Only webui is published on a port (and AIOStreams' setup page, on this
-# machine only: see AIOSTREAMS_PORT). Each browser keeps its own playlists and
-# settings; accounts only decide who can open the site.
+# machine only: see AIOSTREAMS_PORT). Settings, groups and uploaded playlists
+# are saved per account in ./data/settings (see auth/settings.mjs).
 
 name: watchening
 

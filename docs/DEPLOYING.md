@@ -1,8 +1,9 @@
-# Reminders for the real server
+# Putting Watchening on the internet
 
-Things to do when Watchening moves from the test machine to the internet-facing
-server (Traefik in front, Cloudflare DNS). The test machine has none of this, so
-none of it has been tried for real yet. Tick them off as you go.
+A checklist for running Watchening on an internet-facing server, with a
+reverse proxy (the examples use Traefik) doing https in front, and optionally
+Cloudflare for DNS. Tick them off as you go. A setup that's only used at home
+needs none of this.
 
 ## Before the first `docker compose up -d`
 
@@ -53,20 +54,20 @@ networks:
 
 ## Cloudflare
 
-- [ ] **Grey cloud (DNS only) for Watchening's subdomain.** (Decided: of the
-      two subdomains, one is DNS only.) Every `http://` channel, every
+- [ ] **Grey cloud (DNS only) for Watchening's subdomain.** Every `http://` channel, every
       CORS-blocked stream, and all MPEG-DASH plays *through your server*
       (MediaFlow), so a lot of video passes through that hostname. Cloudflare's
       terms have long restricted serving video through its free proxy outside
       its paid video products. Traefik gets the certificate from Let's Encrypt
       (the DNS challenge works with Cloudflare's API).
-- [ ] Make sure the grey one is **the one in `PUBLIC_URL`**, the address
-      people open. The stream proxy is always on the same hostname as the page
-      (`/proxy/`), so if people open Watchening on the orange subdomain, the
-      video goes through Cloudflare after all. If the orange subdomain is
-      something else (ErsatzTV's own page, say), keep ErsatzTV's streams going
-      to Watchening by LAN address (see below), not through that subdomain.
-      Watchening can't yet put pages and streams on separate subdomains.
+- [ ] If you have other subdomains that stay orange (proxied), make sure the
+      grey one is **the one in `PUBLIC_URL`**, the address people open. The
+      stream proxy is always on the same hostname as the page (`/proxy/`), so
+      if people open Watchening on an orange subdomain, the video goes through
+      Cloudflare after all. If an orange subdomain serves something else
+      (ErsatzTV's own page, say), have Watchening reach ErsatzTV's streams by
+      LAN address (see below), not through that subdomain. Watchening can't
+      yet put pages and streams on separate subdomains.
 - [ ] If it stays orange anyway: set Traefik's entrypoint
       `forwardedHeaders.trustedIPs` to Cloudflare's ranges
       (<https://www.cloudflare.com/ips/>), so the visitor's real address reaches
@@ -158,5 +159,3 @@ networks:
 - [ ] Forgot-password by email: needs an `email` trait in
       `auth/kratos/identity.schema.json`, a real SMTP server in `courier`, and
       the code recovery method. Right now an admin makes a new link instead.
-- [ ] Voice search on the on-screen keyboard: on https the page may use the
-      microphone (`getUserMedia`), which opens up the self-hosted Whisper idea.

@@ -19,15 +19,20 @@ A cable box simulator! Watch IPTV and Plex/Jellyfin with a classic cable aesthet
 
 ### First launch
 
-Install `Docker` first
-`git clone https://github.com/SlopHobbyist/watchening`
+Install [Docker](https://docs.docker.com/get-docker/) first (Engine 26 or
+newer, with Compose v2). Then:
 
 ```sh
+git clone https://github.com/SlopHobbyist/watchening
+cd watchening
 docker compose up -d
 docker compose logs accounts     # prints the admin password, can be changed later
 ```
 
-Some linux systems require `sudo` in front of the commands.
+Some Linux systems require `sudo` in front of the `docker` commands.
+
+The voice search image is for x86-64 (amd64) machines. On an ARM server
+(such as a Raspberry Pi), see the note above `speech:` in `docker-compose.yaml`.
 
 Open <http://localhost:8080> and sign in as `admin` with the password from the
 log. If you missed it, it's also printed to `data/admin-login.txt`.
@@ -55,16 +60,16 @@ TVs can choose to save settings in their browser if they wish with `Settings > A
 
 Saved settings, groups and uploaded playlists are kept in `data/settings/`.
 
-`AUTH=off` disable accounts, and ensures the home network shares one saved copy.
+`AUTH=off` disables accounts, and everyone on the home network shares one saved copy.
 
 ### Other
 
-Streams browsers can't play sent through [MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy) first.
+Streams that browsers can't play are sent through [MediaFlow Proxy](https://github.com/mhdzumair/mediaflow-proxy) first.
 
 There's a voice search built into the keyboard. Runs [FUTO's voice input models](https://keyboard.futo.tech/voice-input-models) on server. Can change `SPEECH_MODEL` in `.env`. You must serve over **HTTPS** or browsers refuse to allow microphone permission.
 
 Putting it on the internet behind a reverse proxy: see
-[docs/REMINDERS.md](docs/REMINDERS.md).
+[docs/DEPLOYING.md](docs/DEPLOYING.md).
 
 ### Stremio addons and debrid
 
