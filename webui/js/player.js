@@ -16,6 +16,10 @@
  * On Demand titles (see ondemand.js) come in as channels with `vod` set:
  * `start` is where to begin (seconds) and `dur` the running time, used when
  * the stream doesn't say; `ours`, a stream from this site's own proxy.
+ * Channels made from a media server's shows (see channels.js) have no
+ * address of their own: `resolve()` says what to play, and from where, each
+ * time one is tuned (or reloaded). They play like live TV: no pausing or
+ * seeking, since everyone watching sees the same moment.
  *
  * The two playback libraries are fetched only when a stream needs them, from
  * jsDelivr, or from js/vendor/ if that fails (drop copies there for offline use).
@@ -394,9 +398,22 @@
     P.loading = true;
     emit("state");
     if (ch.embed) return startEmbed(ch, my);
-    const url = await resolveUrl(ch.url);
+    let url, ours = ch.ours;
+    if (ch.resolve) {
+      let r;
+      try {
+        r = await ch.resolve();
+      } catch (e) {
+        if (my === P.token) fail((e && e.message) || "This channel can't be played");
+        return;
+      }
+      if (my !== P.token) return;
+      url = r.url;
+      ours = !!r.ours;
+      P.startAt = r.start || 0;
+    } else url = await resolveUrl(ch.url);
     if (my !== P.token) return;
-    const plan = playPlan(url, ch.ours);
+    const plan = playPlan(url, ours);
     const errs = [];
     let retried = false, skipDirect = false;
     for (let i = 0; i < plan.length; i++) {
@@ -568,7 +585,7 @@
   // -------------------------------------------------------------- transport
   /** Seekable span, or null for live streams we can't move around in. */
   P.range = () => {
-    if (!P.ch || P.error || P.loading) return null;
+    if (!P.ch || P.error || P.loading || P.ch.custom) return null;
     const d = video.duration;
     const s = video.seekable;
     // On Demand: a stream that doesn't give its length (a transcode still
@@ -585,7 +602,7 @@
   };
   P.time = () => video.currentTime;
   P.paused = () => video.paused;
-  P.canPause = () => !!(P.ch && !P.error && !P.loading && !P.frame);
+  P.canPause = () => !!(P.ch && !P.error && !P.loading && !P.frame && !P.ch.custom);
   P.togglePause = () => {
     if (!P.canPause()) return null;
     if (video.paused) { play(); return "play"; }

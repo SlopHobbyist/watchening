@@ -557,6 +557,7 @@ body.watching.idle, body.watching.idle * { cursor: none !important; }
   font-size: 22px; text-shadow: var(--shadow); white-space: nowrap;
 }
 .pb-btn:hover { background: rgba(210,230,168,.3); }
+.pb-btn.off { display: none; }
 .pb-btn.on { color: var(--lime); }
 /* remote control focus: the selected button, or the timeline */
 .pb-btn.focus { background: var(--lime); color: #1e1f1c; text-shadow: none; -webkit-text-stroke: 0; }

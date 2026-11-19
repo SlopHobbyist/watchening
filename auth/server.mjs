@@ -24,6 +24,18 @@
  *                                    another TV saved first
  *     POST   /group                  take the group's settings again
  *     POST   /files  GET /files/:id  uploaded playlist files (text)
+ *   /api/channels...               channels made from a media server's shows
+ *                                  (see channels.mjs, webui/js/channels.js):
+ *     GET    ?from&to[&rev]          every channel and its schedule ({ same }
+ *                                    when rev is still the latest)
+ *     POST   {name, src, show, seasons, order, eps}    make one (admins)
+ *     PATCH  /:id {name, seasons, order, eps}  DELETE /:id   (admins)
+ *     POST   /:id/watch {viewer}     this TV is watching (every few seconds):
+ *                                    who else is, and the votes
+ *     POST   /:id/leave {viewer}     it's stopped
+ *     POST   /:id/vote {viewer, action: restart|skip, pos}   start the
+ *                                    episode over, or skip it
+ *     POST   /:id/unvote {viewer}
  *
  * On first start (no accounts yet) it makes an admin account with a random
  * password, prints it and writes it to data/admin-login.txt. That file is
@@ -39,6 +51,7 @@ import http from "node:http";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import * as Settings from "./settings.mjs";
+import * as Channels from "./channels.mjs";
 
 const AUTH = !/^(off|false|no|0)$/i.test((process.env.AUTH || "on").trim());
 const PUBLIC_URL = ((process.env.PUBLIC_URL || "").trim() || "http://localhost:8080").replace(/\/+$/, "");
@@ -482,6 +495,64 @@ async function settingsApi(req, res, rest) {
   throw new HttpError(404, "Not found");
 }
 
+// ---------------------------------------------------------------- channels
+const VIEWER = /^[a-z0-9-]{8,64}$/i;
+async function channelsApi(req, res, rest) {
+  const { user } = await caller(req);
+  if (AUTH && !user) throw new HttpError(401, "Sign in first");
+  if (req.method !== "GET" && !sameSite(req)) throw new HttpError(403, "Changes must come from this site");
+  const who = user ? user.username : "home";
+  // (with sign-in off, the home network is trusted with everything)
+  const editor = () => {
+    if (AUTH && !user.admin) throw new HttpError(403, "Only admins can make and change channels");
+  };
+  const viewer = (b) => {
+    const v = String(b.viewer || "");
+    if (!VIEWER.test(v)) throw new HttpError(400, "Say which TV this is");
+    return `${user ? user.id : "home"}:${v}`;
+  };
+  const name = user ? user.name || user.username : "";
+  try {
+    if (rest === "" && req.method === "GET") {
+      const q = new URL(req.url, "http://x").searchParams;
+      const rev = q.get("rev");
+      if (rev != null && +rev === Channels.rev()) return send(res, 200, { rev: Channels.rev(), same: true });
+      const num = (k) => (q.get(k) == null || q.get(k) === "" ? undefined : +q.get(k));
+      return send(res, 200, Object.assign(Channels.list(num("from"), num("to")), { edit: !AUTH || !!user.admin }));
+    }
+    if (rest === "" && req.method === "POST") {
+      editor();
+      const ch = Channels.add(await readJson(req, SETTINGS_MAX), who);
+      return send(res, 201, { id: ch.id, rev: Channels.rev() });
+    }
+    const m = /^\/([0-9a-f-]{36})(?:\/(watch|leave|vote|unvote))?$/i.exec(rest);
+    if (!m) throw new HttpError(404, "Not found");
+    const [, id, action] = m;
+    if (!action && req.method === "PATCH") {
+      editor();
+      Channels.update(id, await readJson(req, SETTINGS_MAX), who);
+      return send(res, 200, { rev: Channels.rev() });
+    }
+    if (!action && req.method === "DELETE") {
+      editor();
+      Channels.remove(id, who);
+      return send(res, 204);
+    }
+    if (action && req.method === "POST") {
+      const b = await readJson(req);
+      const v = viewer(b);
+      if (action === "watch") return send(res, 200, Channels.watch(id, v, name));
+      if (action === "leave") { Channels.leave(id, v); return send(res, 204); }
+      if (action === "unvote") return send(res, 200, Channels.unvote(id, v));
+      return send(res, 200, Channels.vote(id, v, name, b.action, Number.isInteger(b.pos) ? b.pos : null));
+    }
+    throw new HttpError(405, "Not allowed");
+  } catch (e) {
+    if (e instanceof Channels.ChannelError) throw new HttpError(e.status, e.message);
+    throw e;
+  }
+}
+
 let warnedProto = false;
 let lastFileCheck = 0; // an admin's page loads also check data/admin-login.txt (see checkLoginFile)
 const server = http.createServer(async (req, res) => {
@@ -511,6 +582,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === "/api/settings" || path.startsWith("/api/settings/")) return await settingsApi(req, res, path.slice("/api/settings".length));
+    if (path === "/api/channels" || path.startsWith("/api/channels/")) return await channelsApi(req, res, path.slice("/api/channels".length));
 
     const m = /^\/api\/admin\/((?:users|groups)(?:\/[^/]+(?:\/[^/]+)?)?)$/.exec(path);
     if (m) {
@@ -630,6 +702,7 @@ if (process.argv.length > 2) {
   await cli(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
 } else {
   Settings.init();
+  Channels.init();
   const sweep = () => {
     try {
       const n = Settings.sweepFiles();

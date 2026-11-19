@@ -572,6 +572,13 @@
     },
     reconnect,
     root, views, list, search, play, release, setSubtitle, episodes, trailer,
+    /** A show's logo (its clearLogo, small, through Plex's image resizer), for the guide. */
+    logo(src, showId) {
+      return url(src.server.uri, "/photo/:/transcode", {
+        width: 240, height: 96, minSize: 1, upscale: 1, format: "png",
+        url: `/library/metadata/${showId}/clearLogo`, "X-Plex-Token": src.server.token,
+      });
+    },
     report(src, it, pl, state, sec) { timeline(src, it, pl, state, sec); },
     stopped(src, it, pl, sec, leaving) {
       release(src, pl, leaving);

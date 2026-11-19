@@ -23,6 +23,7 @@
  *                  (its first rows are On Demand and Search; Down past the last channel
  *                   jumps back to them)
  * Anywhere:        F1 settings
+ *                  (custom channels, see channels.js: the controls have Start Over and Skip)
  * Mouse:           click a listing to select it, click again to tune · wheel scrolls
  *                  click the picture to watch; while watching, move the mouse
  *                  for the control bar, double-click for full screen
@@ -853,12 +854,15 @@
    * moving the mouse has no focus, so the arrows still change channel.
    */
   const CTL_MS = 8000;
-  const BTNS = Array.from(pb.root.querySelectorAll(".pb-btn"));
+  const ALL_BTNS = Array.from(pb.root.querySelectorAll(".pb-btn"));
+  /** The buttons showing (Start Over and Skip only on custom channels). */
+  const btns = () => ALL_BTNS.filter((b) => !b.classList.contains("off"));
   const ctl = { on: false, row: "bar", btn: 0 };
-  const btnIdx = (a) => Math.max(0, BTNS.findIndex((b) => b.dataset.act === a));
+  const btnIdx = (a) => Math.max(0, btns().findIndex((b) => b.dataset.act === a));
   /** Open the controls with focus; `act` focuses that button. */
   function openCtl(act) {
     if (App.mode !== "watch" || !playing()) return;
+    voteButtons(playing());
     if (!ctl.on || act) {
       ctl.on = true;
       ctl.row = Player.range() && !act ? "bar" : "btns";
@@ -868,14 +872,15 @@
     showPbar(CTL_MS);
   }
   function moveBtn(d) {
-    ctl.btn = U.clamp(ctl.btn + d, 0, BTNS.length - 1);
+    ctl.btn = U.clamp(ctl.btn + d, 0, btns().length - 1);
     renderCtl();
   }
   function renderCtl() {
     const on = ctl.on && pbarShown();
     if (on && ctl.row === "bar" && !Player.range()) ctl.row = "btns";
     pb.root.classList.toggle("focus-bar", on && ctl.row === "bar");
-    BTNS.forEach((b, i) => b.classList.toggle("focus", on && ctl.row === "btns" && i === ctl.btn));
+    const shown = btns();
+    ALL_BTNS.forEach((b) => b.classList.toggle("focus", on && ctl.row === "btns" && b === shown[ctl.btn]));
   }
   /** Keys while the controls have focus. */
   function keyCtl(e, nav) {
@@ -890,7 +895,8 @@
       if (nav === "down" && Player.range()) ctl.row = "bar";
       else if (nav === "left" || nav === "right") moveBtn(nav === "left" ? -1 : 1);
       else if (nav === "ok") {
-        act[BTNS[ctl.btn].dataset.act]({ fromCtl: true });
+        const b = btns()[ctl.btn];
+        if (b) act[b.dataset.act]({ fromCtl: true });
       }
     }
     renderCtl();
@@ -991,8 +997,20 @@
     pb.tab.style.left = U.clamp(trackX + frac * trackW - tabW / 2, 0, pb.root.offsetWidth - tabW) + "px";
 
     pb.root.querySelector('[data-act="subs"]').classList.toggle("on", !!Player.cc);
+    voteButtons(ch);
     renderCtl();
   }
+  /** Start Over and Skip: on custom channels, with how a vote stands. */
+  function voteButtons(ch) {
+    const custom = !!(ch && ch.custom && !ch.vod);
+    for (const [act, what] of [["startOver", "restart"], ["skipEp", "skip"]]) {
+      const b = pb.root.querySelector(`[data-act="${act}"]`);
+      b.classList.toggle("off", !custom);
+      if (custom) b.textContent = Channels.voteText(what);
+    }
+    ctl.btn = U.clamp(ctl.btn, 0, btns().length - 1);
+  }
+  App.refreshControls = () => { if (pbarShown()) renderPbar(); };
 
   // ----------------------------------------------------------------- actions
   let osdTimer = 0;
@@ -1018,13 +1036,20 @@
       showPbar();
     },
     rew() { act.skip(-10); },
+    /** Custom channels: start the episode over, or skip it (a vote when other TVs are watching). */
+    async startOver() { await Channels.vote("restart"); if (pbarShown()) renderPbar(); },
+    async skipEp() { await Channels.vote("skip"); if (pbarShown()) renderPbar(); },
     ff() { act.skip(10); },
     cc() {
       const v = S.vod;
       if (v && v.burn) { OnDemand.chooseSub(null); return; } // subtitles drawn into the picture
       const label = Player.toggleCC();
       const file = v && v.subs.find((x) => x.url);
+      const chanFile = !v && Player.ch && Player.ch.custom ? Channels.subFile() : null;
       if (label === null && file) OnDemand.chooseSub(file);
+      else if (label === null && chanFile) {
+        Channels.showSub(chanFile).then(() => osd(`Subtitles: ${chanFile.label}`), (e) => osd(`Couldn't load the subtitles: ${e.message}`, 4000));
+      }
       else if (label === null) osd("No subtitles in this stream. See Subtitles for more options.", 4000);
       else osd(label === "Off" ? "Subtitles Off" : `Subtitles: ${label}`);
       if (pbarShown()) renderPbar();
@@ -1477,6 +1502,8 @@
         });
       }
     }
+    // channels made from a media server's shows (channels.js), after the playlists'
+    if (window.Channels) for (const c of Channels.channels()) list.push(Object.assign(c, { sched: [], nat: list.length }));
     const pos = new Map(cfg.order.map((k, i) => [k, i]));
     const rank = (c) => (pos.has(c.key) ? pos.get(c.key) : 1e9 + c.nat);
     list.sort((a, b) => rank(a) - rank(b));
@@ -1510,7 +1537,7 @@
   };
 
   function attachGuide() {
-    for (const c of App.all) c.sched = XMLTV.withKinds(XMLTV.lookup(App.guide, c) || [], c);
+    for (const c of App.all) c.sched = c.custom ? Channels.programs(c.custom) : XMLTV.withKinds(XMLTV.lookup(App.guide, c) || [], c);
   }
 
   function refreshViews() {
@@ -1789,7 +1816,7 @@
     await U.serverReady; // sign-in and the stream proxy, before anything plays
     await Sync.ready;    // settings saved on the server, if they're newer
     if (Sync.editing) showEditing();
-    await Promise.all(Store.cfg.playlists.map((pl) => App.loadPlaylist(pl, false)));
+    await Promise.all(Store.cfg.playlists.map((pl) => App.loadPlaylist(pl, false)).concat([Channels.load()]));
     App.rebuild();
     if (N()) {
       const i = App.channels.findIndex((c) => c.key === Store.cfg.last);

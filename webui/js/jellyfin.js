@@ -863,6 +863,10 @@
       return `Jellyfin server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
     root, views, list, search, play, release, episodes, trailer,
+    /** A show's logo, for the guide. */
+    logo(src, showId) {
+      return url(src.server.uri, `/Items/${showId}/Images/Logo`, { maxHeight: 96, format: "Png", ApiKey: src.server.token });
+    },
     report,
     stopped(src, it, pl, sec, leaving) {
       release(src, pl, leaving);

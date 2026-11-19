@@ -7,6 +7,7 @@ A cable box simulator! Watch IPTV and Plex/Jellyfin with a classic cable aesthet
 - **Interactive guide** - in the style of the 2005 Comcast iGuide
 - **Video player** - can display subtitles and change aspect ratios
 - **On Demand** - can play pre recorded media from various sources
+- **Custom channels** - 24 hour channels that play a show from Plex or Jellyfin, in order or shuffled
 - **Account management** - can remotely manage settings for family members and novices
 ### Sources
 - **Plex**
@@ -98,6 +99,27 @@ ever sees the server's address, however many people watch at once. Files are
 played as they are, never converted: MP4 and MKV with H.264 play everywhere,
 HEVC, Dolby Vision, DTS and TrueHD often don't in a browser, so On Demand
 prefers versions that will.
+
+### Custom channels
+
+Make channels out of the shows on your Plex or Jellyfin server under
+**Settings > Custom Channels > Make a Channel** (admins). Pick the show, which
+seasons (so "old" and "new" Simpsons can be separate channels), a name, and
+whether it plays in order or shuffled (shuffled plays every episode once before
+any repeats). The channel then runs around the clock, with listings in the
+guide, and everyone who tunes in sees the same episode at the same moment.
+
+Like live TV there's no pausing or seeking. Instead, the controls (OK while
+watching) have **Start Over** and **Skip**. If yours is the only TV on the
+channel, they happen right away. With others watching, they're a vote: when
+more than half of the TVs agree (or the others leave), it happens for everyone.
+
+Each TV plays the episodes through its own On Demand sign-in to that server, so
+people need it in **Settings > On Demand** (group settings carry it). Channels
+are added after the others in the guide; move them with **Settings > Channels**.
+Watching a channel doesn't mark episodes as watched. New episodes on the server
+are picked up with **Look for New Episodes** on the channel. Channels are saved
+in `data/settings/channels.json`.
 
 ## Licenses
 
