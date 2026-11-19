@@ -65,6 +65,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      # checked every second while starting: Traefik only routes to it once
+      # healthy, so otherwise the site is gone for 30s after every restart
+      start_period: 10s
+      start_interval: 1s
     <<: *logging
 
   # Guide listings for zlive's channels, served at /epg/zlive.xml.gz

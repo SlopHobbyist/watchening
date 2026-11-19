@@ -711,6 +711,7 @@
   }
 
   function quickConnect(found) {
+    const who = found.aio ? "AIOStreams" : "Jellyfin";
     let alive = true, timer = 0;
     const stop = () => { alive = false; clearTimeout(timer); };
     const opts = {
@@ -726,8 +727,8 @@
     const still = () => alive && Dialog.is(opts);
     let secret = "", born = 0;
     const newCode = async () => {
-      const r = await call(found.uri, "/QuickConnect/Initiate", { method: "POST" });
-      if (!r.Secret || !r.Code) throw new Error("Jellyfin didn't give a code");
+      const r = await call(found.uri, "/QuickConnect/Initiate", { method: "POST", who });
+      if (!r.Secret || !r.Code) throw new Error(`${who} didn't give a code`);
       secret = r.Secret;
       born = Date.now();
       if (!still()) return;
@@ -740,14 +741,14 @@
       if (!still()) return;
       try {
         if (Date.now() - born > CODE_LIFE) await newCode();
-        const r = await call(found.uri, "/QuickConnect/Connect", { params: { secret } });
+        const r = await call(found.uri, "/QuickConnect/Connect", { params: { secret }, who });
         if (!still()) return;
         if (r.Authenticated) {
           stop();
           Dialog.big("");
           Dialog.message("Signing in...");
           try {
-            signedIn(found, await call(found.uri, "/Users/AuthenticateWithQuickConnect", { method: "POST", body: { Secret: secret } }), opts);
+            signedIn(found, await call(found.uri, "/Users/AuthenticateWithQuickConnect", { method: "POST", body: { Secret: secret }, who }), opts);
           } catch (e) {
             if (Dialog.is(opts)) Dialog.message(e.message, true);
           }
@@ -759,7 +760,7 @@
       if (still()) timer = setTimeout(poll, 2000);
     };
     newCode().then(() => { if (still()) timer = setTimeout(poll, 2000); }, (e) => {
-      if (still()) Dialog.message(`Couldn't get a code from Jellyfin: ${e.auth ? "Quick Connect is turned off on this server" : e.message}`, true);
+      if (still()) Dialog.message(`Couldn't get a code from ${who}: ${e.auth ? "Quick Connect is turned off on this server" : e.message}`, true);
     });
   }
 
@@ -779,7 +780,7 @@
             Dialog.message("Signing in...");
             let auth;
             try {
-              auth = await call(found.uri, "/Users/AuthenticateByName", { method: "POST", body: { Username: v.user.trim(), Pw: v.pw } });
+              auth = await call(found.uri, "/Users/AuthenticateByName", { method: "POST", body: { Username: v.user.trim(), Pw: v.pw }, who: a ? "AIOStreams" : "Jellyfin" });
             } catch (e) {
               Dialog.message(e.auth ? (a ? "AIOStreams didn't accept that UUID and password." : "Jellyfin didn't accept that username and password.") : e.message, true);
               return false;
@@ -799,12 +800,12 @@
   /** AIOStreams' media server at an address: { uri, info, aio, qc }. */
   async function findAio(uri) {
     let info;
-    try { info = await call(uri, "/System/Info/Public", { timeout: 8000 }); } catch (e) {
+    try { info = await call(uri, "/System/Info/Public", { timeout: 8000, who: "AIOStreams" }); } catch (e) {
       throw new Error(`${e.message}. ${U.server.aiostreams && uri.startsWith(location.origin) ? "Is the aiostreams container running (docker compose ps)?" : "Check the address."}`);
     }
     if (!info || !info.aiostreams) throw new Error("That address answered, but it isn't AIOStreams.");
     let qc = false;
-    try { qc = (await call(uri, "/QuickConnect/Enabled", { timeout: 8000 })) === true; } catch { /* password only */ }
+    try { qc = (await call(uri, "/QuickConnect/Enabled", { timeout: 8000, who: "AIOStreams" })) === true; } catch { /* password only */ }
     return { uri, info, aio: true, qc };
   }
 
