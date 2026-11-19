@@ -1,14 +1,17 @@
 /*
  * Channels of our own, for the accounts service (server.mjs): one show from a
- * media server (Plex or Jellyfin), some or all of its seasons, playing around
- * the clock, in order or shuffled. Everyone sees the same schedule, so people
- * watching on different TVs are watching the same episode at the same moment.
+ * media server (Plex or Jellyfin), some or all of its seasons, or a YouTube
+ * channel's uploads or a playlist, playing around the clock, in order or
+ * shuffled. Everyone sees the same schedule, so people watching on different
+ * TVs are watching the same episode at the same moment.
  *
- * The TV that makes a channel sends its episodes (ids, running times, titles,
- * and where the intro and end credits are, when the channel skips them): the
- * server never talks to the media server itself. Each TV plays the episode
- * through its own On Demand connection to that server (see
- * webui/js/channels.js).
+ * The TV that makes a Plex or Jellyfin channel sends its episodes (ids,
+ * running times, titles, and where the intro and end credits are, when the
+ * channel skips them): the server never talks to the media server itself.
+ * Each TV plays the episode through its own On Demand connection to that
+ * server (see webui/js/channels.js). YouTube is the other way round: the
+ * server reads the list from YouTube, and the TVs play each video in
+ * YouTube's own player (see "YouTube" below).
  *
  * The schedule is worked out, not stored: an anchor says which episode of the
  * channel's endless run starts when ({ t, pos }), and from there each
@@ -27,7 +30,8 @@
  *
  * Times within an episode are the channel's: with Skip Intros on, the intro
  * isn't counted, and with Skip Credits on, the episode ends where its end
- * credits start (TVs jump over the intro as they play).
+ * credits start; a YouTube video's sponsors and the like (`cut`) are never
+ * counted (TVs jump over what's left out as they play).
  *
  * Watching: the TVs tuned to a channel say so every few seconds. A TV can ask
  * to start the episode over, go back to the previous one (then this one again
@@ -46,9 +50,10 @@
  *     seasons: [first, last] | [first, null] (to the latest) | null (all), order: "order" | "shuffle", seed,
  *     skip: { intro, credits },
  *     eps: [{ id, title, season, episode, dur (s), desc, rating, aired,
- *             intro: [start, end] | null, credits: start | null, mk (markers looked for) }],
+ *             intro: [start, end] | null, credits: start | null, mk (markers looked for),
+ *             cut: [[start, end]] (YouTube: always left out; none: no key) }],
  *     anchor: { t, pos }, lead: [{ i, t, pos, back: [i], off, pause: { by, name } }], omit: [pos],
- *     created, by }] }
+ *     created, by, yt (YouTube channels: see below) }] }
  * (lead was one { i, t } or null once: load() brings those up to date.)
  * rev goes up with every change to a channel or its schedule, so TVs know to
  * ask again. Who's watching and the votes are only in memory.
@@ -56,6 +61,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import * as YT from "./youtube.mjs";
+
+const { merge } = YT;
 
 const DIR = process.env.SETTINGS_DIR || "/data/settings";
 const FILE = path.join(DIR, "channels.json");
@@ -91,6 +99,7 @@ function load() {
     if (!Array.isArray(L)) ch.lead = L && typeof L === "object" ? [{ i: L.i, t: L.t, pos: ch.anchor.pos - 1, back: [] }] : [];
     if (!Array.isArray(ch.omit)) ch.omit = [];
     if (!ch.skip) ch.skip = { intro: false, credits: false };
+    if (ch.yt && !Array.isArray(ch.yt.bad)) ch.yt.bad = [];
   }
   return doc;
 }
@@ -154,18 +163,32 @@ function epAt(ch, pos) {
   return a[k];
 }
 
-/** What the channel plays of episode i (seconds): the intro it leaves out, if
- *  any, and where it stops (the end credits, or the end). */
+/**
+ * What the channel plays of episode i (seconds): the parts it leaves out
+ * (`gaps`, in order: the intro with Skip Intros on, and a YouTube video's
+ * sponsors and the like, `cut`), and where it stops (the end credits with
+ * Skip Credits on, else the end; a gap that runs to the end ends it there).
+ * webui/js/channels.js does the same sums.
+ */
 function cuts(ch, i) {
   const e = ch.eps[i], s = ch.skip || {};
-  const end = s.credits && e.credits ? e.credits : e.dur;
-  const intro = s.intro && e.intro && e.intro[1] < end ? e.intro : null;
-  return { intro, end };
+  let end = s.credits && e.credits ? e.credits : e.dur;
+  const spans = (e.cut || []).slice();
+  if (s.intro && e.intro) spans.push(e.intro);
+  const gaps = [];
+  for (const [a, b] of merge(spans)) {
+    if (a >= end) break;
+    if (b >= end - 1) { end = a; break; }
+    gaps.push([a, b]);
+  }
+  // (with next to nothing left, play it all)
+  if (end - gaps.reduce((t, g) => t + g[1] - g[0], 0) < 5) return { gaps: [], end: e.dur };
+  return { gaps, end };
 }
 /** Episode i's length on the channel (ms). */
 function durMs(ch, i) {
   const c = cuts(ch, i);
-  return Math.round((c.end - (c.intro ? c.intro[1] - c.intro[0] : 0)) * 1000);
+  return Math.round((c.end - c.gaps.reduce((t, g) => t + g[1] - g[0], 0)) * 1000);
 }
 const passMs = (ch) => ch.eps.reduce((s, e, i) => s + durMs(ch, i), 0);
 
@@ -271,10 +294,16 @@ function restartRun(ch, before, now) {
       for (const e of leadAfter(before, cur.k)) if (map(e.i) >= 0) keep.push(Object.assign(e, { i: map(e.i), back: backs(e.back) }));
     }
   }
-  ch.omit = []; // (a new run)
+  // the same episodes in the same order (only how long they play changed:
+  // skipping turned on or off, SponsorBlock's parts found): the run carries
+  // on where it was, so a shuffle doesn't start its pass again
+  const sameEps = ch.order === before.order && ch.seed === before.seed && ch.eps.length === before.eps.length &&
+    ch.eps.every((e, i) => e.id === before.eps[i].id);
+  const next = !sameEps ? null : !cur ? before.anchor.pos : cur.lead ? before.anchor.pos : cur.pos + 1;
+  ch.omit = next == null ? [] : before.omit.filter((q) => q >= next); // (else a new run)
   if (!keep.length) {
     ch.lead = [];
-    ch.anchor = { t: now, pos: 0 };
+    ch.anchor = { t: now, pos: next == null ? 0 : next };
     return;
   }
   let t = cur.start;
@@ -286,7 +315,7 @@ function restartRun(ch, before, now) {
     return e;
   });
   // in order: carry on from the episode after the last of them
-  ch.anchor = { t, pos: ch.order === "shuffle" ? 0 : keep[keep.length - 1].i + 1 };
+  ch.anchor = { t, pos: next != null ? next : ch.order === "shuffle" ? 0 : keep[keep.length - 1].i + 1 };
 }
 
 // ---------------------------------------------------------------- checking
@@ -317,7 +346,16 @@ function cleanSeasons(v) {
   return [v[0], v[1]];
 }
 const sec = (v) => Math.round(+v * 1000) / 1000;
-function cleanEps(v) {
+/** Parts of a video always left out (YouTube's sponsors and the like): [[start, end]], in order. */
+function cleanCut(v, dur) {
+  if (!Array.isArray(v)) return [];
+  const spans = v.slice(0, 100).filter((s) => Array.isArray(s) && s.length === 2)
+    .map(([a, b]) => [sec(Math.max(0, +a)), sec(Math.min(dur, +b))])
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b - a >= 0.5);
+  return merge(spans);
+}
+/** `min`: the shortest running time that can be scheduled (s). */
+function cleanEps(v, min = 30) {
   if (!Array.isArray(v)) throw new ChannelError(400, "Send the channel's episodes");
   if (v.length > MAX_EPS) throw new ChannelError(400, `A channel can have at most ${MAX_EPS} episodes`);
   const out = [];
@@ -325,7 +363,7 @@ function cleanEps(v) {
     if (!e || typeof e !== "object") continue;
     const id = str(e.id, 100), dur = +e.dur;
     // (running times under half a minute, or none, can't be scheduled)
-    if (!id || !(dur >= 30 && dur <= 6 * 3600)) continue;
+    if (!id || !(dur >= min && dur <= 12 * 3600)) continue;
     // markers that make sense: an intro in the first half that isn't most of
     // it, end credits in the second half
     const iv = Array.isArray(e.intro) ? e.intro.map(Number) : null;
@@ -337,12 +375,14 @@ function cleanEps(v) {
       desc: str(e.desc, 400), rating: str(e.rating, 20), aired: str(e.aired, 10),
       intro, credits, mk: !!e.mk,
     });
+    const cut = cleanCut(e.cut, dur);
+    if (cut.length) out[out.length - 1].cut = cut;
   }
   if (!out.length) throw new ChannelError(400, "None of those episodes has a running time, so nothing can be scheduled");
   return out;
 }
 function cleanSrc(v) {
-  if (!v || typeof v !== "object" || (v.type !== "plex" && v.type !== "jellyfin")) throw new ChannelError(400, "Channels play from Plex or Jellyfin");
+  if (!v || typeof v !== "object" || (v.type !== "plex" && v.type !== "jellyfin")) throw new ChannelError(400, "Channels play from Plex, Jellyfin or YouTube");
   const server = str(v.server, 200);
   if (!server) throw new ChannelError(400, "Say which server the channel plays from");
   return { type: v.type, server, name: str(v.name, 80) || (v.type === "plex" ? "Plex" : "Jellyfin") };
@@ -366,8 +406,27 @@ export function list(from, to) {
     channels: d.channels.map((ch) => ({
       id: ch.id, name: ch.name, src: ch.src, show: ch.show, seasons: ch.seasons, order: ch.order, skip: ch.skip,
       eps: ch.eps, sched: schedule(ch, from, to),
+      yt: ch.yt ? ytInfo(ch) : undefined,
     })),
   };
+}
+
+/**
+ * The channel's episodes are now `eps` (already checked): if that changes
+ * what plays when, the run starts again after the episode on now. `before`:
+ * a copy of the channel from before this change (which may have changed
+ * other things too). true if anything changed.
+ */
+function setEps(ch, eps, before, now) {
+  const was = ch.eps;
+  const same = eps.length === was.length && eps.every((e, i) => e.id === was[i].id && e.dur === was[i].dur);
+  ch.eps = eps;
+  if (!same || ch.eps.some((e, i) => durMs(ch, i) !== durMs(before, i))) {
+    restartRun(ch, before, now);
+    votes.delete(ch.id);
+    return true;
+  }
+  return JSON.stringify(was) !== JSON.stringify(eps);
 }
 export const rev = () => load().rev;
 
@@ -394,17 +453,22 @@ export function update(id, b, by) {
   const now = Date.now();
   const before = Object.assign({}, ch);
   let rerun = false;
+  if (ch.yt && (b.eps !== undefined || b.seasons !== undefined)) throw new ChannelError(400, "A YouTube channel's videos come from YouTube");
+  // YouTube: shorts, live stream replays, which way round (checked before anything changes)
+  let yt = null;
+  if (ch.yt && b.yt !== undefined) {
+    const o = cleanYtOpts(b.yt, ch.yt);
+    if (o.shorts !== ch.yt.shorts || o.live !== ch.yt.live || o.rev !== ch.yt.rev) {
+      yt = Object.assign({}, ch.yt, o);
+      if (!ytEps(Object.assign({}, ch, { yt })).length) throw new ChannelError(400, ytNone({ yt }));
+    }
+  }
   if (b.name !== undefined) ch.name = cleanName(b.name);
   if (b.seasons !== undefined) ch.seasons = cleanSeasons(b.seasons);
-  if (b.eps !== undefined) {
-    const eps = cleanEps(b.eps);
-    // the same episodes, as long on the channel (a check for new ones that
-    // found none, or two TVs checking at once): take in any new titles and
-    // the like, but the schedule stays as it is
-    const same = eps.length === ch.eps.length && eps.every((e, i) => e.id === ch.eps[i].id && e.dur === ch.eps[i].dur);
-    ch.eps = eps;
-    if (!same || ch.eps.some((e, i) => durMs(ch, i) !== durMs(before, i))) rerun = true;
-  }
+  // (the same episodes, as long on the channel, from a check for new ones
+  // that found none, or two TVs checking at once: any new titles and the
+  // like are taken in, but the schedule stays as it is)
+  if (b.eps !== undefined) setEps(ch, cleanEps(b.eps), before, now);
   if (b.order !== undefined && cleanOrder(b.order) !== ch.order) {
     ch.order = b.order;
     ch.seed = crypto.randomBytes(8).toString("hex"); // a fresh shuffle
@@ -413,6 +477,11 @@ export function update(id, b, by) {
   if (b.skip !== undefined) {
     const s = cleanSkip(b.skip);
     if (s.intro !== ch.skip.intro || s.credits !== ch.skip.credits) { ch.skip = s; rerun = true; }
+  }
+  if (yt) {
+    ch.yt = yt;
+    setEps(ch, ytEps(ch), before, now);
+    queueSB(ch.id);
   }
   if (rerun) { restartRun(ch, before, now); votes.delete(id); }
   changed();
@@ -428,6 +497,277 @@ export function remove(id, by) {
   votes.delete(id);
   changed();
   log(`${by || "someone"} removed the channel ${ch.name}`);
+}
+
+// ----------------------------------------------------------------- YouTube
+/*
+ * A YouTube channel's uploads or a playlist, played in YouTube's own player
+ * on each TV (so the people who made them get the views). The server reads
+ * the list from YouTube itself (youtube.mjs; the browser can't), and keeps
+ * every video in it (yt.vids, in YouTube's order: a channel's newest first,
+ * a playlist's own), whether each is a short or a live stream's replay, and
+ * SponsorBlock's parts. The channel's episodes are the ones its settings
+ * pick (ytEps), so turning shorts or replays on or off, or playing it the
+ * other way round, needs nothing new from YouTube.
+ *
+ *   yt: { kind: "channel" | "playlist", id, logo, shorts, live, rev (newest
+ *         first / the playlist backwards), at (last read), vids: [{ id,
+ *         title, dur, aired (rough), lv, sh (a short: true | false | null,
+ *         not known), intro, credits, cut, sb (when SponsorBlock was asked) }],
+ *         bad: [ids that YouTube won't play outside youtube.com] }
+ *
+ * Skip Credits (on by default) leaves out end cards and credits; Skip Intros
+ * an intro animation or intermission (else the Skip Intro button shows);
+ * sponsors, self promotion and reminders to subscribe are always left out.
+ * The list is read again every few hours, for new uploads. SponsorBlock is
+ * asked about each video once, a little at a time in the background, and
+ * again for the first couple of weeks after a video comes out (when most of
+ * its parts are added).
+ */
+const YT_EVERY = 6 * 3600e3;     // read each list again this often
+const SB_FRESH = 14 * 86400e3;   // SponsorBlock is asked again about videos this new...
+const SB_AGAIN = 12 * 3600e3;    // ...this often
+const MIN_YT = 5;                // the shortest video scheduled (s)
+
+const ytInfo = (ch) => {
+  const y = ch.yt;
+  return { kind: y.kind, id: y.id, logo: y.logo, shorts: y.shorts, live: y.live, rev: y.rev, at: y.at, vids: y.vids.length, bad: y.bad.length };
+};
+function cleanYtOpts(v, was) {
+  if (!v || typeof v !== "object") throw new ChannelError(400, "YouTube options are { shorts, live, rev }");
+  const pick = (k) => (v[k] === undefined ? !!(was && was[k]) : !!v[k]);
+  return { shorts: pick("shorts"), live: pick("live"), rev: pick("rev") };
+}
+/** A short, as far as anyone knows (not known yet: a minute or less). */
+const shortish = (v) => (v.sh == null ? v.dur <= 60 : v.sh);
+/** The videos a YouTube channel plays, as episodes, in order. */
+function ytEps(ch) {
+  const y = ch.yt, bad = new Set(y.bad);
+  let vids = y.vids.filter((v) => !bad.has(v.id) && v.dur >= MIN_YT && (y.shorts || !shortish(v)) && (y.live || !v.lv));
+  // (too many: the newest of a channel, the start of a playlist)
+  vids = vids.slice(0, MAX_EPS);
+  // a channel's list is newest first; "in order" is oldest first
+  if (y.kind === "channel" ? !y.rev : y.rev) vids.reverse();
+  return cleanEps(vids.map((v) => ({
+    id: v.id, title: v.title, dur: v.dur, aired: v.aired, rating: "", season: null, episode: null,
+    desc: [v.lv && "A live stream's replay.", shortish(v) && "A short."].filter(Boolean).join(" "),
+    intro: v.intro || null, credits: v.credits || null, cut: v.cut || [], mk: true,
+  })), MIN_YT);
+}
+const ytNone = (ch) => `There are no videos to play${!ch.yt.shorts || !ch.yt.live
+  ? ` with ${[!ch.yt.shorts && "shorts", !ch.yt.live && "live stream replays"].filter(Boolean).join(" and ")} left out` : ""}`;
+
+/** Look up which of `vids` (without sh yet) of 3 minutes or less are shorts, a few at a time. */
+async function findShorts(vids, progress) {
+  const todo = vids.filter((v) => v.sh == null && YT.mightBeShort(v.dur));
+  let next = 0, done = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const v = todo[next++];
+      v.sh = await YT.isShort(v.id);
+      done++;
+      if (progress && (done % 10 === 0 || done === todo.length)) progress(`Looking for shorts: ${done} of ${todo.length}...`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, todo.length) }, worker));
+  for (const v of vids) if (v.sh == null && !YT.mightBeShort(v.dur)) v.sh = false;
+}
+
+/** The list as YouTube has it now, with what's known already of each video kept. */
+async function readList(kind, id, old, progress) {
+  const got = await YT.videos(kind, id, (n) => progress && progress(`Reading the list of videos: ${n.toLocaleString("en-US")}...`));
+  const had = new Map((old || []).map((v) => [v.id, v]));
+  const vids = got.map((v) => {
+    const o = had.get(v.id);
+    // (YouTube says roughly how old a video is, so the first reading is the closest)
+    return o ? Object.assign({}, o, { title: v.title || o.title, dur: v.dur, lv: v.lv || o.lv }) : v;
+  });
+  await findShorts(vids, progress);
+  return vids;
+}
+
+// jobs: things that take a while (reading a long list), which the TV asks after
+const jobs = new Map(); // id -> { at, msg, done, error, result }
+function job(fn) {
+  const id = crypto.randomUUID();
+  const j = { at: Date.now(), msg: "Starting...", done: false, error: "", result: null };
+  jobs.set(id, j);
+  for (const [k, x] of jobs) if (Date.now() - x.at > 3600e3) jobs.delete(k);
+  fn((m) => { j.msg = m; }).then(
+    (r) => { j.done = true; j.result = r || null; },
+    (e) => { j.done = true; j.error = e.message || String(e); if (!(e instanceof ChannelError || e instanceof YT.YouTubeError)) log(`YouTube: ${j.error}`); },
+  );
+  return id;
+}
+/** How a job is going: { done, msg, error, result }. */
+export function jobState(id) {
+  const j = jobs.get(id);
+  if (!j) throw new ChannelError(404, "That's finished with (or the server restarted): look at the channels again");
+  return { done: j.done, msg: j.msg, error: j.error, result: j.result };
+}
+
+/** What a YouTube link is: { kind, id, title }. */
+export async function ytLookup(url) {
+  return pickYtError(() => YT.resolve(url)).then((r) => ({ kind: r.kind, id: r.id, title: r.title }));
+}
+async function pickYtError(fn) {
+  try { return await fn(); } catch (e) {
+    if (e instanceof YT.YouTubeError) throw new ChannelError(400, e.message);
+    throw new ChannelError(502, e.message);
+  }
+}
+
+/** Make a YouTube channel: { name, order, yt: { url, shorts, live, rev } }. A job. */
+export function addYoutube(b, by) {
+  const d = load();
+  if (d.channels.length >= MAX_CHANNELS) throw new ChannelError(400, `There can be at most ${MAX_CHANNELS} channels`);
+  if (!b.yt || typeof b.yt !== "object") throw new ChannelError(400, "Paste a link to a YouTube channel or playlist");
+  const opts = cleanYtOpts(b.yt, null);
+  const order = cleanOrder(b.order || "order");
+  const named = str(b.name, 200);
+  if (named) cleanName(named);
+  try { YT.parse(b.yt.url); } catch (e) { throw new ChannelError(400, e.message); } // (a link that can't be one fails now, not in the job)
+  return job(async (say) => {
+    say("Finding it on YouTube...");
+    const r = await pickYtError(() => YT.resolve(b.yt.url));
+    const vids = await pickYtError(() => readList(r.kind, r.id, null, say));
+    if (!vids.length) throw new ChannelError(400, "YouTube didn't list any videos there that can be played");
+    const now = Date.now();
+    const name = cleanName(named || r.title.slice(0, 40));
+    const yt = Object.assign({ kind: r.kind, id: r.id, logo: (r.logo || "").replace(/=s\d+-/, "=s88-"), at: now, vids, bad: [] }, opts);
+    const ch = {
+      id: crypto.randomUUID(), name,
+      src: { type: "youtube", server: "youtube", name: "YouTube" },
+      show: { id: r.id, title: r.title }, seasons: null, order, seed: crypto.randomBytes(8).toString("hex"),
+      // end cards and credits left out unless asked for
+      skip: { intro: false, credits: true }, yt, eps: [],
+      anchor: { t: Math.floor(now / SLOT) * SLOT, pos: 0 }, lead: [], omit: [],
+      created: new Date(now).toISOString(), by: str(by, 64),
+    };
+    ch.eps = ytEps(ch);
+    if (!ch.eps.length) throw new ChannelError(400, ytNone(ch));
+    if (load().channels.length >= MAX_CHANNELS) throw new ChannelError(400, `There can be at most ${MAX_CHANNELS} channels`);
+    load().channels.push(ch);
+    changed();
+    log(`${by || "someone"} made the channel ${ch.name} (YouTube ${r.kind} ${r.title}, ${ch.eps.length} of ${vids.length} videos, ${order})`);
+    queueSB(ch.id);
+    return { id: ch.id, n: ch.eps.length, of: vids.length };
+  });
+}
+
+/** Read a YouTube channel's list again (new uploads). { fresh, gone }. */
+const reading = new Set();
+async function ytRefresh(id, say, quiet) {
+  if (reading.has(id)) throw new ChannelError(409, "It's being looked at already");
+  reading.add(id);
+  try {
+    let ch = must(id);
+    const vids = await pickYtError(() => readList(ch.yt.kind, ch.yt.id, ch.yt.vids, say));
+    ch = must(id); // (still there?)
+    const old = ch.yt.vids;
+    // far fewer than before: more likely YouTube having a bad moment than
+    // the videos deleted (left for an admin to look at)
+    if (old.length >= 10 && vids.length < old.length / 2) {
+      throw new ChannelError(502, `YouTube listed ${vids.length} videos where there were ${old.length}, so the channel was left as it was`);
+    }
+    const before = Object.assign({}, ch);
+    const ids = new Set(vids.map((v) => v.id)), was = new Set(old.map((v) => v.id));
+    ch.yt = Object.assign({}, ch.yt, { vids, at: Date.now() });
+    ch.yt.bad = ch.yt.bad.filter((x) => ids.has(x));
+    const eps = ytEps(ch);
+    // (only what's kept about the videos changed: saved, but the TVs needn't look again)
+    if (eps.length && setEps(ch, eps, before, Date.now())) changed(); else save();
+    const fresh = vids.filter((v) => !was.has(v.id)).length, gone = old.filter((v) => !ids.has(v.id)).length;
+    if (fresh || gone || !quiet) log(`channel ${ch.name}: ${fresh} new video(s) on YouTube, ${gone} gone`);
+    queueSB(id);
+    return { fresh, gone, n: ch.eps.length };
+  } finally {
+    reading.delete(id);
+  }
+}
+/** Look for new videos now: a job. */
+export function ytRefreshJob(id) {
+  const ch = must(id);
+  if (!ch.yt) throw new ChannelError(400, "That isn't a YouTube channel");
+  return job((say) => ytRefresh(id, say, false));
+}
+
+// SponsorBlock, in the background: one channel at a time, a few videos at once
+const sbWant = new Set();
+let sbBusy = false;
+function queueSB(id) {
+  sbWant.add(id);
+  if (!sbBusy) runSB();
+}
+async function runSB() {
+  sbBusy = true;
+  try {
+    while (sbWant.size) {
+      const id = sbWant.values().next().value;
+      sbWant.delete(id);
+      try { await fillSB(id); } catch (e) { log(`SponsorBlock: ${e.message}`); }
+    }
+  } finally {
+    sbBusy = false;
+  }
+}
+const needsSB = (v, now) => !v.sb || (now - v.sb > SB_AGAIN && v.aired && now - Date.parse(v.aired) < SB_FRESH);
+async function fillSB(id) {
+  let ch = find(id);
+  if (!ch || !ch.yt) return;
+  const now = Date.now();
+  const playing = new Set(ch.eps.map((e) => e.id));
+  // the next ones to play first, so they're the first to be right
+  const upNext = new Map(schedule(ch, now, now + 2 * 86400e3).map(([, , i], k) => [ch.eps[i] && ch.eps[i].id, k]));
+  const todo = ch.yt.vids.filter((v) => playing.has(v.id) && needsSB(v, now))
+    .map((v) => ({ id: v.id, dur: v.dur }))
+    .sort((a, b) => (upNext.has(a.id) ? upNext.get(a.id) : 1e9) - (upNext.has(b.id) ? upNext.get(b.id) : 1e9));
+  if (!todo.length) return;
+  const found = new Map();
+  let next = 0, failed = 0, done = 0, stop = false;
+  /** What's been found so far, onto the channel (as it is now) */
+  const keep = () => {
+    const c = find(id);
+    if (!c || !c.yt || !found.size) return;
+    const before = Object.assign({}, c);
+    c.yt = Object.assign({}, c.yt, {
+      vids: c.yt.vids.map((v) => (found.has(v.id) ? Object.assign({}, v, found.get(v.id)) : v)),
+    });
+    found.clear();
+    const eps = ytEps(c);
+    if (eps.length && setEps(c, eps, before, Date.now())) changed(); else save();
+  };
+  const worker = async () => {
+    while (!stop && next < todo.length) {
+      if (!find(id)) { stop = true; break; } // (the channel was removed)
+      const v = todo[next++];
+      try {
+        const s = await YT.segments(v.id, v.dur);
+        found.set(v.id, { intro: s.intro, credits: s.credits, cut: s.cut, sb: Date.now() });
+      } catch (e) {
+        // SponsorBlock down: try again with the next look at the list
+        if (++failed >= 10 && failed > done) { stop = true; log(`SponsorBlock: ${e.message}; trying again later`); }
+      }
+      done++;
+      if (found.size >= 200) keep();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, todo.length) }, worker));
+  keep();
+  ch = find(id);
+  if (ch) log(`channel ${ch.name}: SponsorBlock asked about ${done} video(s)`);
+}
+
+/** Every so often: lists that haven't been read for a while are read again. */
+async function ytTick() {
+  for (const ch of load().channels.slice()) {
+    if (!ch.yt || Date.now() - ch.yt.at < YT_EVERY || reading.has(ch.id)) continue;
+    try { await ytRefresh(ch.id, null, true); } catch (e) {
+      log(`channel ${ch.name}: couldn't read its list from YouTube (${e.message}); trying again later`);
+      const c = find(ch.id);
+      if (c) c.yt.at = Date.now() - YT_EVERY + 3600e3; // in an hour
+    }
+  }
 }
 
 // ---------------------------------------------------------- watching, votes
@@ -674,6 +1014,35 @@ export function unvote(id, viewer) {
   return state(ch, viewer, Date.now());
 }
 
+/**
+ * A TV says YouTube won't play the video on now outside youtube.com (its
+ * owner turned embedding off; private, gone, or age-restricted). Everyone
+ * goes on to the next one at once, and it's left off the channel from the
+ * next look at the list (so a shuffle isn't started again for it now).
+ * `code`: YouTube's error (100: not found, 101 and 150: not allowed).
+ */
+const UNPLAYABLE = [100, 101, 150];
+export function unplayable(id, viewer, name, start, code) {
+  const ch = must(id);
+  if (!ch.yt) throw new ChannelError(400, "That isn't a YouTube channel");
+  if (!UNPLAYABLE.includes(code)) throw new ChannelError(400, "That isn't a reason to skip a video");
+  const now = Date.now();
+  const cur = at(ch, now);
+  if (!cur) throw new ChannelError(409, "Nothing is on this channel right now");
+  if (start !== cur.start) throw new ChannelError(409, "The video has already changed");
+  seen(id, viewer, name, now);
+  const vid = ch.eps[cur.i].id;
+  if (!ch.yt.bad.includes(vid)) ch.yt.bad = ch.yt.bad.concat(vid).slice(-MAX_EPS);
+  log(`channel ${ch.name}: YouTube won't play "${ch.eps[cur.i].title}" (${vid}) here (error ${code}), skipped`);
+  if (!apply(ch, "skip", cur, now, null)) changed();
+  done.set(ch.id, { action: "unplayable", at: now, pos: cur.pos });
+  return state(ch, viewer, now);
+}
+
 export function init() {
   load();
+  // YouTube: SponsorBlock where it was left off, and lists read again as they come due
+  for (const ch of doc.channels) if (ch.yt) queueSB(ch.id);
+  setTimeout(ytTick, 60e3);
+  setInterval(ytTick, 10 * 60e3);
 }

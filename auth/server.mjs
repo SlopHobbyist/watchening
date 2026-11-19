@@ -29,7 +29,14 @@
  *     GET    ?from&to[&rev]          every channel and its schedule ({ same }
  *                                    when rev is still the latest)
  *     POST   {name, src, show, seasons, order, skip, eps}    make one (admins)
- *     PATCH  /:id {name, seasons, order, skip, eps}  DELETE /:id   (admins)
+ *     POST   {name, src: {type: "youtube"}, order, yt: {url, shorts, live, rev}}
+ *                                    make one from a YouTube channel or
+ *                                    playlist: 202 {job} (it takes a while)
+ *     POST   /youtube {url}          what a YouTube link is: {kind, id, title}
+ *     GET    /jobs/:job              how that's going: {done, msg, error, result}
+ *     PATCH  /:id {name, seasons, order, skip, eps, yt: {shorts, live, rev}}
+ *                                    DELETE /:id   (admins)
+ *     POST   /:id/refresh            a YouTube channel's list, read again: 202 {job}
  *     POST   /:id/watch {viewer}     this TV is watching (every few seconds):
  *                                    who else is, and the votes
  *     POST   /:id/leave {viewer}     it's stopped
@@ -38,6 +45,8 @@
  *                                    seek (arg {to}: seconds in), pause
  *                                    (arg {min}), resume
  *     POST   /:id/unvote {viewer}
+ *     POST   /:id/unplayable {viewer, start, code}   YouTube won't play the
+ *                                    video on now here: everyone skips it
  *
  * On first start (no accounts yet) it makes an admin account with a random
  * password, prints it and writes it to data/admin-login.txt. That file is
@@ -520,14 +529,22 @@ async function channelsApi(req, res, rest) {
       const rev = q.get("rev");
       if (rev != null && +rev === Channels.rev()) return send(res, 200, { rev: Channels.rev(), same: true });
       const num = (k) => (q.get(k) == null || q.get(k) === "" ? undefined : +q.get(k));
-      return send(res, 200, Object.assign(Channels.list(num("from"), num("to")), { edit: !AUTH || !!user.admin }));
+      return send(res, 200, Object.assign(Channels.list(num("from"), num("to")), { edit: !AUTH || !!user.admin, youtube: true }));
     }
     if (rest === "" && req.method === "POST") {
       editor();
-      const ch = Channels.add(await readJson(req, SETTINGS_MAX), who);
+      const b = await readJson(req, SETTINGS_MAX);
+      if (b && b.src && b.src.type === "youtube") return send(res, 202, { job: Channels.addYoutube(b, who) });
+      const ch = Channels.add(b, who);
       return send(res, 201, { id: ch.id, rev: Channels.rev() });
     }
-    const m = /^\/([0-9a-f-]{36})(?:\/(watch|leave|vote|unvote))?$/i.exec(rest);
+    if (rest === "/youtube" && req.method === "POST") {
+      editor();
+      return send(res, 200, await Channels.ytLookup((await readJson(req)).url));
+    }
+    const j = /^\/jobs\/([0-9a-f-]{36})$/i.exec(rest);
+    if (j && req.method === "GET") return send(res, 200, Channels.jobState(j[1]));
+    const m = /^\/([0-9a-f-]{36})(?:\/(watch|leave|vote|unvote|unplayable|refresh))?$/i.exec(rest);
     if (!m) throw new HttpError(404, "Not found");
     const [, id, action] = m;
     if (!action && req.method === "PATCH") {
@@ -540,12 +557,17 @@ async function channelsApi(req, res, rest) {
       Channels.remove(id, who);
       return send(res, 204);
     }
+    if (action === "refresh" && req.method === "POST") {
+      editor();
+      return send(res, 202, { job: Channels.ytRefreshJob(id) });
+    }
     if (action && req.method === "POST") {
       const b = await readJson(req);
       const v = viewer(b);
       if (action === "watch") return send(res, 200, Channels.watch(id, v, name));
       if (action === "leave") { Channels.leave(id, v); return send(res, 204); }
       if (action === "unvote") return send(res, 200, Channels.unvote(id, v));
+      if (action === "unplayable") return send(res, 200, Channels.unplayable(id, v, name, Number.isFinite(b.start) ? b.start : null, Number.isInteger(b.code) ? b.code : null));
       return send(res, 200, Channels.vote(id, v, name, b.action, Number.isInteger(b.pos) ? b.pos : null, Number.isFinite(b.start) ? b.start : null, b.arg));
     }
     throw new HttpError(405, "Not allowed");

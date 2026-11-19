@@ -829,8 +829,9 @@
     const ep = it.type === "episode" && !!it.show;
     return {
       vod: true, key: `vod|${src.id}|${it.id}`, url: pl.url, start: pl.start || 0, dur: pl.dur || it.dur,
+      yt: pl.yt || null, // (a YouTube video: YouTube's own player, see channels.js)
       name: ep ? it.show : it.title,
-      call: it.extra || (ep ? epCode(it) : it.year ? String(it.year) : srcLabel(src)),
+      call: it.extra || (ep ? epCode(it) || srcLabel(src) : it.year ? String(it.year) : srcLabel(src)),
       desc: itemInfo(src, it).desc,
       subs: pl.subs || [], burn: pl.burn || null, ours: !!pl.ours,
       src, item: it, play: pl,

@@ -7,6 +7,10 @@
  *   unknown          tries native, then HLS, then MPEG-TS
  *   embed            zlive channels: the provider's own player in an iframe
  *                    (live only: no pause, seeking or subtitles; mute reloads it)
+ *   yt               YouTube videos (custom channels made from YouTube, see
+ *                    channels.js): YouTube's own embedded player, through its
+ *                    IFrame Player API, which can be paused, moved around in
+ *                    and muted from here; subtitles are YouTube's own
  *   MPEG-DASH        only through the server's stream proxy, which turns it into HLS
  *
  * When the server has a stream proxy (MediaFlow, see U.server), a stream that
@@ -66,9 +70,11 @@
 
   const P = (window.Player = {
     ch: null,
-    how: "",          // native | hls | ts | flv | embed
+    how: "",          // native | hls | ts | flv | embed | yt
     proxied: false,   // playing through the server's stream proxy
-    frame: null,      // the <iframe> playing an embed channel
+    frame: null,      // the <iframe> playing an embed channel (or YouTube)
+    yt: null,         // YouTube's player (YT.Player), playing a YouTube video
+    errorCode: 0,     // YouTube's reason for the last error (2, 5, 100, 101, 150...)
     live: false,
     loading: false,
     error: "",
@@ -201,7 +207,8 @@
     if (!P.autoMuted) return;
     P.autoMuted = false;
     video.muted = false;
-    if (P.frame) P.load(P.ch, true); // an embed only takes sound when it loads
+    if (P.yt) { try { P.yt.unMute(); if (!P.held) P.yt.playVideo(); } catch { /* not ready */ } }
+    else if (P.frame) P.load(P.ch, true); // an embed only takes sound when it loads
     else if (P.ch && !P.error && !P.held) video.play().catch(() => {});
     emit("unmuted");
   };
@@ -242,6 +249,96 @@
     layoutVideo();
   }
 
+  /*
+   * YouTube. Its IFrame Player API (loaded from youtube.com when first
+   * needed) puts YouTube's own player in an iframe and lets this page start,
+   * pause, move around in and mute it, and hear when it plays, ends or
+   * can't play. The video plays from youtube.com, so the views count. As
+   * with embeds, the browser only autoplays it muted before the first click
+   * or key press; YouTube's player can then be unmuted without loading it
+   * again. Its own controls are hidden (ours are drawn over it), and mouse
+   * clicks don't reach it (style.css), so it never takes the keyboard.
+   */
+  let ytApi = null;
+  function youtubeApi() {
+    if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+    if (!ytApi) {
+      ytApi = new Promise((ok, fail) => {
+        const prev = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = () => { if (typeof prev === "function") prev(); ok(window.YT); };
+        const no = () => { ytApi = null; fail(new Error("Couldn't load YouTube's player (offline, or youtube.com is blocked here?)")); };
+        script("https://www.youtube.com/iframe_api").catch(no);
+        setTimeout(() => { if (!(window.YT && window.YT.Player)) no(); }, 20000);
+      });
+    }
+    return ytApi;
+  }
+  const YT_ERRORS = {
+    2: "YouTube couldn't play this video (a bad link)",
+    5: "YouTube's player couldn't play this video in this browser",
+    100: "This video is private, or has been taken down",
+    101: "The video's owner doesn't let it play outside YouTube",
+    150: "The video's owner doesn't let it play outside YouTube",
+  };
+  async function startYouTube(ch, id, start, my) {
+    const ua = navigator.userActivation;
+    if (ua && !ua.hasBeenActive && !video.muted) {
+      video.muted = true;
+      P.autoMuted = true;
+      emit("muted");
+    }
+    let Y;
+    try { Y = await youtubeApi(); } catch (e) { if (my === P.token) fail(e.message); return; }
+    if (my !== P.token) return;
+    const holder = document.createElement("div");
+    holder.id = "yt-" + my;
+    tv.insertBefore(holder, ccEl);
+    start = Math.max(0, start || 0);
+    const yp = new Y.Player(holder, {
+      videoId: id, width: "100%", height: "100%", host: "https://www.youtube.com",
+      playerVars: {
+        autoplay: 1, mute: video.muted ? 1 : 0, start: Math.floor(start), controls: 0, disablekb: 1, fs: 0,
+        iv_load_policy: 3, rel: 0, playsinline: 1, cc_load_policy: P.ccWanted ? 1 : 0, enablejsapi: 1, origin: location.origin,
+      },
+      events: {
+        onReady: () => {
+          if (P.yt !== yp) return;
+          try {
+            if (video.muted) yp.mute(); else yp.unMute();
+            if (!P.held) yp.playVideo();
+          } catch { /* */ }
+        },
+        onStateChange: (e) => {
+          if (P.yt !== yp) return;
+          const st = e.data;
+          if (st === 1 && P.loading) {
+            // (start= is whole seconds; a resumed title goes to the exact point)
+            if (start > 0 && Math.abs(yp.getCurrentTime() - start) > 2) yp.seekTo(start, true);
+            P.loading = false;
+          }
+          if (st === 1 && P.held) yp.pauseVideo();
+          if (st === 0 && !P.loading && !P.error) emit("ended");
+          emit("state");
+        },
+        onError: (e) => {
+          if (P.yt !== yp || my !== P.token) return;
+          P.errorCode = e.data;
+          fail(YT_ERRORS[e.data] || `YouTube couldn't play this video (error ${e.data})`);
+        },
+      },
+    });
+    P.yt = yp;
+    P.ytCC = !!P.ccWanted;
+    P.how = "yt";
+    P.live = false;
+    const f = document.getElementById(holder.id) || holder;
+    f.tabIndex = -1;
+    f.title = ch.name;
+    P.frame = f;
+    layoutVideo();
+    setTimeout(() => { if (P.yt === yp && my === P.token && P.loading) fail("YouTube's player didn't start"); }, 30000);
+  }
+
   function teardown() {
     if (P.hls) { try { P.hls.destroy(); } catch { /* */ } P.hls = null; }
     if (P.ts) {
@@ -253,7 +350,13 @@
       video.removeAttribute("src");
       try { video.load(); } catch { /* */ }
     }
+    if (P.yt) {
+      const yp = P.yt;
+      P.yt = null;
+      try { yp.destroy(); } catch { /* */ }
+    }
     if (P.frame) { P.frame.remove(); P.frame = null; }
+    for (const el of tv.querySelectorAll("[id^='yt-']")) el.remove();
     resetNet();
     P.live = false;
     P.how = "";
@@ -381,7 +484,7 @@
    *  its subtitle choice and offset. */
   P.load = async (ch, isReload) => {
     // reloading an On Demand title picks up where it stalled
-    const at = isReload && ch && ch === P.ch && ch.vod && video.currentTime > 0 ? video.currentTime : null;
+    const at = isReload && ch && ch === P.ch && ch.vod && P.time() > 0 ? P.time() : null;
     const my = ++P.token;
     teardown();
     if (!isReload) { P.reloads = 0; resetCC(); }
@@ -389,6 +492,7 @@
     P.held = false;
     P.startAt = at != null ? at : (ch && ch.start) || 0;
     P.error = "";
+    P.errorCode = 0;
     tv.classList.remove("nosignal");
     if (!ch) {
       P.loading = false;
@@ -400,6 +504,7 @@
     P.loading = true;
     emit("state");
     if (ch.embed) return startEmbed(ch, my);
+    if (ch.yt) return startYouTube(ch, ch.yt, P.startAt, my);
     let url, ours = ch.ours;
     if (ch.resolve) {
       let r;
@@ -410,6 +515,7 @@
         return;
       }
       if (my !== P.token) return;
+      if (r.yt) return startYouTube(ch, r.yt, r.start || 0, my);
       url = r.url;
       ours = !!r.ours;
       P.startAt = r.start || 0;
@@ -588,6 +694,12 @@
   /** Seekable span, or null for live streams we can't move around in. */
   P.range = () => {
     if (!P.ch || P.error || P.loading || P.ch.custom) return null;
+    if (P.yt) {
+      let end = 0;
+      try { end = P.yt.getDuration(); } catch { /* */ }
+      end = end > 0 ? end : P.ch.dur || 0;
+      return end > 0 ? { vod: true, start: 0, end } : null;
+    }
     const d = video.duration;
     const s = video.seekable;
     // On Demand: a stream that doesn't give its length (a transcode still
@@ -602,11 +714,21 @@
     }
     return null;
   };
-  P.time = () => video.currentTime;
-  P.paused = () => video.paused;
-  P.canPause = () => !!(P.ch && !P.error && !P.loading && !P.frame && !P.ch.custom);
+  /** YouTube's player state (1 playing, 2 paused...), or -1 before it's ready. */
+  const ytState = () => { try { return P.yt.getPlayerState(); } catch { return -1; } };
+  P.time = () => {
+    if (P.yt) { try { return P.yt.getCurrentTime() || 0; } catch { return 0; } }
+    return video.currentTime;
+  };
+  P.paused = () => (P.yt ? ytState() !== 1 && ytState() !== 3 : video.paused);
+  P.canPause = () => !!(P.ch && !P.error && !P.loading && (!P.frame || P.yt) && !P.ch.custom);
   P.togglePause = () => {
     if (!P.canPause()) return null;
+    if (P.yt) {
+      if (P.paused()) { P.yt.playVideo(); return "play"; }
+      P.yt.pauseVideo();
+      return "pause";
+    }
     if (video.paused) { play(); return "play"; }
     video.pause();
     return "pause";
@@ -619,22 +741,24 @@
   P.seekTo = (t) => {
     const c = P.clampTime(t);
     if (c == null) return false;
-    video.currentTime = c;
+    if (P.yt) P.yt.seekTo(c, true); else video.currentTime = c;
     return true;
   };
-  P.skip = (sec) => P.seekTo(video.currentTime + sec);
+  P.skip = (sec) => P.seekTo(P.time() + sec);
   /** Custom channels, which can't be paused or seeked by hand: hold the
    *  picture still (paused for everyone), or go on. */
   P.hold = (on) => {
     if (!!P.held === !!on) return;
     P.held = !!on;
-    if (on) video.pause(); else if (P.ch && !P.error && !P.loading) play();
+    if (P.yt) { try { if (on) P.yt.pauseVideo(); else if (!P.error && !P.loading) P.yt.playVideo(); } catch { /* not ready */ } }
+    else if (on) video.pause(); else if (P.ch && !P.error && !P.loading) play();
     emit("state");
   };
   /** ...and go to a point in the episode (a vote to seek, or over the intro). */
   P.jump = (t) => {
     if (!P.ch || P.error || P.loading || !(t >= 0)) return false;
-    video.currentTime = t;
+    if (P.yt) { try { P.yt.seekTo(t, true); } catch { return false; } }
+    else video.currentTime = t;
     return true;
   };
   P.seekFrac = (f) => {
@@ -643,8 +767,9 @@
   };
   P.toggleMute = () => {
     P.autoMuted = false;
-    video.muted = !video.muted; // also the mute setting for embed channels
-    if (P.frame) P.load(P.ch, true);
+    video.muted = !video.muted; // also the mute setting for embed channels and YouTube
+    if (P.yt) { try { if (video.muted) P.yt.mute(); else P.yt.unMute(); } catch { /* */ } }
+    else if (P.frame) P.load(P.ch, true);
     return video.muted;
   };
 
@@ -718,6 +843,19 @@
   /** C: off <-> the last track used (else the first). Returns the new label,
    *  "Off", or null when the stream has no subtitles. */
   P.toggleCC = () => {
+    // YouTube draws its own (when the video has them)
+    if (P.yt) {
+      P.ytCC = !P.ytCC;
+      P.ccWanted = P.ytCC;
+      try {
+        if (P.ytCC) {
+          P.yt.loadModule("captions");
+          const lang = (navigator.language || "en").split("-")[0];
+          P.yt.setOption("captions", "track", { languageCode: lang });
+        } else P.yt.unloadModule("captions");
+      } catch { /* */ }
+      return P.ytCC ? "YouTube's captions (if the video has them)" : "Off";
+    }
     if (P.cc) { P.setTrack(null); return "Off"; }
     const list = P.ccTracks();
     if (!list.length) return null;

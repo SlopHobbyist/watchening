@@ -7,7 +7,7 @@ A cable box simulator! Watch IPTV and Plex/Jellyfin with a classic cable aesthet
 - **Interactive guide** - in the style of the 2005 Comcast iGuide
 - **Video player** - can display subtitles and change aspect ratios
 - **On Demand** - can play pre recorded media from various sources
-- **Custom channels** - 24 hour channels that play a show from Plex or Jellyfin, in order or shuffled
+- **Custom channels** - 24 hour channels that play a show from Plex or Jellyfin, or a YouTube channel or playlist, in order or shuffled
 - **Account management** - can remotely manage settings for family members and novices
 ### Sources
 - **Plex**
@@ -131,7 +131,8 @@ Plex (a vote too). On Demand shows the same buttons; Skip Credits goes on to
 the show's next episode.
 
 Each TV plays the episodes through its own On Demand sign-in to that server, so
-people need it in **Settings > On Demand** (group settings carry it). Channels
+people need it in **Settings > On Demand** (group settings carry it). (YouTube
+channels need nothing: see below.) Channels
 are added after the others in the guide; move them with **Settings > Channels**.
 Watching a channel doesn't mark episodes as watched. New episodes on the server
 are added by themselves: an admin's TV checks each channel's show every six
@@ -139,6 +140,34 @@ hours while the app is open (the accounts service doesn't talk to Plex or
 Jellyfin itself). To check right away, use **Look for New Episodes** on the
 channel. Channels are saved
 in `data/settings/channels.json`.
+
+#### YouTube channels
+
+**Make a Channel > YouTube** takes a link to a YouTube channel
+(`youtube.com/@name`, for all of its uploads) or a playlist
+(`youtube.com/playlist?list=...`). Choose whether it plays **Shorts** and
+**Live Stream Replays** (both off to start with), and its order: oldest first,
+newest first or shuffled for a channel, the playlist's order, backwards or
+shuffled for a playlist. All of that can be changed on the channel later.
+Big channels take a minute or two to read (a channel plays its newest 5,000
+videos at most).
+
+Videos play in YouTube's own embedded player, so the people who made them get
+the views (and YouTube may show its ads). No API key or account is needed:
+Watchening's server reads the lists the way youtube.com's own pages do, and
+looks at them again every six hours for new uploads (**Look for New Videos**
+to look now). A video whose owner doesn't allow it to play outside YouTube is
+skipped for everyone the first time a TV runs into it, and left off the
+channel after that.
+
+[SponsorBlock](https://sponsor.ajay.app)'s crowd-sourced skips are added over
+the first few minutes after a channel is made (and for each new video):
+sponsors, self promotion and reminders to like and subscribe are always left
+out, and end cards and credits are too unless **Skip End Cards and Credits** is
+turned off. An intro animation or intermission gets the **Skip Intro**
+button, or is left out with **Skip Intro Animations** on. As with Plex's
+intros and credits, the schedule leaves them out, so everyone stays on the
+same moment.
 
 ## Licenses
 
@@ -165,8 +194,10 @@ It's built on these projects, each under its own license:
 The Comcast and TV Guide logos and the channel logos in `webui/assets/` are
 trademarks of their owners. They're used here only to identify the channels,
 and Watchening isn't affiliated with or endorsed by any of them. The same goes
-for Plex, Jellyfin, Stremio, zlive and the debrid services, which
-Watchening connects to but doesn't include.
+for Plex, Jellyfin, Stremio, YouTube, zlive and the debrid services, which
+Watchening connects to but doesn't include. Skip times for YouTube videos come
+from [SponsorBlock](https://sponsor.ajay.app), whose data is under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
 > [!NOTE]
 > Watchening doesn't host, provide or distribute any TV channels, shows or movies. It's only a player: everything it plays comes from sources you set up yourself, such as your own IPTV playlists, your Plex or Jellyfin servers, or the Stremio addons and debrid account you set up in AIOStreams. Watchening doesn't run or control any of those sources. Make sure you have the right to watch what you play.

@@ -1,13 +1,16 @@
 /*
- * Channels of our own, made from the shows on a Plex or Jellyfin server: one
- * show (all of it, or some of its seasons) playing around the clock, in order
- * or shuffled. The server keeps them and works out their schedules
+ * Channels of our own, made from the shows on a Plex or Jellyfin server (one
+ * show, all of it or some of its seasons), or from YouTube (a channel's
+ * uploads, or a playlist), playing around the clock, in order or shuffled. The server keeps them and works out their schedules
  * (auth/channels.mjs), so everyone is shown the same episode at the same
  * moment; they're in the guide with the other channels (main.js adds them).
  *
  * Playing one: the episode on now, from the right point, through this TV's
  * own On Demand connection to that server (the source with the same server
- * id). When it ends, the next one on the schedule. Everyone sees the same
+ * id); a YouTube video in YouTube's own player (so its maker gets the view),
+ * with SponsorBlock's sponsors and the like jumped over. When it ends, the
+ * next one on the schedule. A video YouTube won't play outside youtube.com
+ * is skipped for everyone (this TV tells the server). Everyone sees the same
  * moment, so pausing and seeking are for everyone: play/pause asks to pause
  * it for a few minutes, the control bar's ◀▶ to go to another point, and its
  * Vote button has Start Over, Previous (that one, then this one again),
@@ -35,6 +38,8 @@
   const BEAT = 6000;        // saying "watching" (and hearing about votes)
   const POLL = 60e3;        // schedule changes, when not watching one
   const TYPES = ["plex", "jellyfin"];
+  /** YouTube, as an On Demand source (it needs no sign-in: see the provider below). */
+  const YT_SRC = { id: "youtube", type: "youtube", name: "YouTube", server: { id: "youtube" } };
   const viewer = (crypto.randomUUID ? crypto.randomUUID() : U.uid() + U.uid()).replace(/[^a-z0-9-]/gi, "");
 
   const C = {
@@ -42,6 +47,7 @@
     defs: [],        // the channels, as the server sends them (with sched: [[start, end, ep, pos]])
     edit: false,     // this person can make and change channels
     known: false,    // the server has answered
+    youtube: false,  // the server can make channels from YouTube
     state: null,     // the channel being watched: { id, viewers, votes, done, ... } from the server
   };
   let win = { from: 0, to: 0 };   // the schedule's window
@@ -83,6 +89,7 @@
       win = w;
       C.rev = d.rev;
       C.edit = !!d.edit;
+      C.youtube = !!d.youtube;
       C.defs = (d.channels || []).map((c) => Object.assign(c, { sched: c.sched || [] }));
       progs.clear();
       return true;
@@ -101,7 +108,9 @@
 
   const byId = (id) => C.defs.find((d) => d.id === id) || null;
   /** This TV's On Demand source for a channel's server. */
-  const sourceFor = (d) => OnDemand.sources().find((s) => s.type === d.src.type && s.server && s.server.id === d.src.server) || null;
+  const isYT = (d) => d.src.type === "youtube";
+  const sourceFor = (d) => (isYT(d) ? YT_SRC
+    : OnDemand.sources().find((s) => s.type === d.src.type && s.server && s.server.id === d.src.server) || null);
   /** What's on a channel at time t: { start, end, i (its episode), pos, off
    *  (how far into the episode it starts, the channel's seconds), pause } */
   function entryAt(d, t) {
@@ -121,23 +130,52 @@
   /*
    * The channel's time and the video's: with Skip Intros on, a channel's
    * episode leaves its intro out (and with Skip Credits, stops where the end
-   * credits start), so seconds into the episode on the channel aren't
-   * seconds into the video. (The same sums as the server's.)
+   * credits start), and a YouTube video leaves out SponsorBlock's sponsors
+   * and the like (`cut`), so seconds into the episode on the channel aren't
+   * seconds into the video. (The same sums as the server's, in
+   * auth/channels.mjs: cuts.)
    */
+  function merge(spans) {
+    const out = [];
+    for (const s of spans.slice().sort((a, b) => a[0] - b[0])) {
+      const last = out[out.length - 1];
+      if (last && s[0] <= last[1] + 0.5) last[1] = Math.max(last[1], s[1]);
+      else out.push([s[0], s[1]]);
+    }
+    return out;
+  }
+  const gapsLen = (gaps) => gaps.reduce((t, g) => t + g[1] - g[0], 0);
+  /** What the channel plays of an episode: { gaps (left out, in order), end }. */
   function cutsOf(d, ep) {
     const s = d.skip || {};
-    const end = s.credits && ep.credits ? ep.credits : ep.dur;
-    const intro = s.intro && ep.intro && ep.intro[1] < end ? ep.intro : null;
-    return { intro, end };
+    let end = s.credits && ep.credits ? ep.credits : ep.dur;
+    const spans = (ep.cut || []).slice();
+    if (s.intro && ep.intro) spans.push(ep.intro);
+    const gaps = [];
+    for (const [a, b] of merge(spans)) {
+      if (a >= end) break;
+      if (b >= end - 1) { end = a; break; }
+      gaps.push([a, b]);
+    }
+    if (end - gapsLen(gaps) < 5) return { gaps: [], end: ep.dur };
+    return { gaps, end };
   }
   /** An episode's length on the channel (s). */
-  const chanDur = (d, ep) => { const c = cutsOf(d, ep); return c.end - (c.intro ? c.intro[1] - c.intro[0] : 0); };
+  const chanDur = (d, ep) => { const c = cutsOf(d, ep); return c.end - gapsLen(c.gaps); };
   /** The channel's seconds into an episode -> the video's. */
-  const toMedia = (d, ep, x) => { const c = cutsOf(d, ep); return c.intro && x >= c.intro[0] ? x + c.intro[1] - c.intro[0] : x; };
-  /** ...and back (inside a skipped intro: where it starts). */
+  const toMedia = (d, ep, x) => {
+    let t = x;
+    for (const g of cutsOf(d, ep).gaps) { if (t >= g[0]) t += g[1] - g[0]; else break; }
+    return t;
+  };
+  /** ...and back (inside a gap: where it starts). */
   const fromMedia = (d, ep, t) => {
-    const c = cutsOf(d, ep);
-    return !c.intro || t < c.intro[0] ? t : Math.max(c.intro[0], t - (c.intro[1] - c.intro[0]));
+    let x = t;
+    for (const g of cutsOf(d, ep).gaps) {
+      if (t >= g[1]) x -= g[1] - g[0];
+      else if (t > g[0]) x -= t - g[0];
+    }
+    return Math.max(0, x);
   };
   /** How far into its episode entry `e` is at `now` (the channel's seconds). */
   const chanAt = (e, now) => (e.pause ? e.off : e.off + Math.max(0, now - e.start) / 1000);
@@ -149,7 +187,7 @@
       const src = sourceFor(d);
       const p = src && OnDemand.providers[src.type];
       let logo = "";
-      try { logo = p && p.logo ? p.logo(src, d.show.id) : ""; } catch { /* none */ }
+      try { logo = isYT(d) ? (d.yt && d.yt.logo) || "" : p && p.logo ? p.logo(src, d.show.id) : ""; } catch { /* none */ }
       return {
         key: "chan|" + d.id, url: "", name: d.name, call: U.shortName(d.name), logo,
         group: d.show.title, tvgId: "", tvgName: "", plId: "channels", plName: "Custom Channels",
@@ -202,6 +240,12 @@
     if (!src) throw new Error(`This channel plays from ${d.src.name}, which isn't in On Demand on this TV. Add it in Settings, On Demand.`);
     const p = OnDemand.providers[src.type];
     const ep = d.eps[e.i];
+    if (isYT(d)) {
+      // YouTube's own player (player.js), from the right point
+      release();
+      playing = Object.assign({ id, src, pl: null, subs: [], subsDone: true, markers: null }, e);
+      return { yt: ep.id, start: toMedia(d, ep, chanAt(e, Date.now())) };
+    }
     const item = { id: ep.id, type: "episode", title: ep.title, show: d.show.title, season: ep.season, episode: ep.episode, dur: ep.dur };
     const pl = await p.play(src, item, { at: toMedia(d, ep, chanAt(e, Date.now())), burn: null });
     if (my !== resolving) {
@@ -292,9 +336,13 @@
     else if (!e && now >= playing.end) return retune(ch);
     else if (e) playing.end = e.end;
     Player.hold(playing.pause);
-    // Skip Intros: over the intro as it comes
-    const c = cutsOf(d, d.eps[playing.i]), t = Player.time();
-    if (c.intro && !playing.pause && t >= c.intro[0] - 0.5 && t < c.intro[1] - 1) Player.jump(c.intro[1]);
+    // YouTube's player takes a moment to start: once it's going, catch up to
+    // where the schedule is (only once: after that it plays on as it is)
+    if (isYT(d) && !playing.synced && !playing.pause && Player.time() > 0) {
+      playing.synced = true;
+      const want = toMedia(d, d.eps[playing.i], chanAt(playing, now));
+      if (Math.abs(Player.time() - want) > 1.5) Player.jump(want);
+    }
     if (!playing.subsDone) {
       playing.subsDone = true;
       const sub = playing.subs.find((s) => s.url && s.selected) || playing.subs.find((s) => s.url);
@@ -302,6 +350,40 @@
       wantSubs = false;
     }
   }, 1000);
+
+  /*
+   * What the channel leaves out (a skipped intro, YouTube's sponsors and the
+   * like), jumped over as it comes: checked often, so little of it shows.
+   * An On Demand YouTube video (Continue in On Demand) skips the sponsors
+   * the same way.
+   */
+  const inGap = (gaps, t) => gaps.find((g) => t >= g[0] - 0.3 && t < g[1] - 0.5);
+  setInterval(() => {
+    const ch = Player.ch;
+    if (!ch || Player.loading || Player.error) return;
+    if (ch.custom && !ch.vod) {
+      if (!playing || playing.id !== ch.custom || playing.pause) return;
+      const d = byId(ch.custom), ep = d && d.eps[playing.i];
+      const g = ep && inGap(cutsOf(d, ep).gaps, Player.time());
+      if (g) Player.jump(g[1]);
+    } else if (ch.vod && ch.play && ch.play.cut && ch.play.cut.length && !Player.paused()) {
+      const g = inGap(ch.play.cut, Player.time());
+      if (g) Player.seekTo(g[1]);
+    }
+  }, 250);
+
+  // a YouTube video that can't be played here (its owner doesn't allow it,
+  // or it's gone): tell the server, which skips it for everyone
+  const UNPLAYABLE = [100, 101, 150];
+  Player.on((type) => {
+    const ch = Player.ch;
+    if (type !== "error" || !ch || !ch.custom || ch.vod || !playing || playing.id !== ch.custom) return;
+    if (!UNPLAYABLE.includes(Player.errorCode)) return;
+    const was = playing;
+    App.osd("YouTube won't play this video here: skipping it...", 4000);
+    api("POST", `/api/channels/${ch.custom}/unplayable`, { viewer, start: was.start, code: Player.errorCode })
+      .then((st) => { onState(ch.custom, st); return refresh(true); }, () => refresh(true));
+  });
 
   // the video ran out at (about) the end of its time: on to the next now
   // (the timer above can be slow in a tab that isn't showing)
@@ -350,6 +432,7 @@
     restart: "Started over by vote", prev: "Back to the previous episode by vote",
     skip: "Skipped to the next episode by vote", next: "By vote, the next episode in order plays after this one",
     seek: "Moved by vote", pause: "Paused for everyone", resume: "Resumed",
+    unplayable: "YouTube won't play that video outside youtube.com: skipped to the next one",
   };
   function onState(id, st) {
     if (id !== watchingId) return;
@@ -486,6 +569,9 @@
       id: ep.id, type: "episode", title: ep.title, show: d.show.title, season: ep.season, episode: ep.episode,
       dur: ep.dur, desc: ep.desc, rating: ep.rating, aired: ep.aired, offset: t, watched: false, cat: "", showId: d.show.id,
     };
+    // (YouTube: its intro and end cards for the Skip buttons, and the sponsors to jump over)
+    // (and no date: YouTube only says roughly how old a video is)
+    if (isYT(d)) Object.assign(item, { showId: "", aired: "", intro: ep.intro || null, credits: ep.credits || null, cut: ep.cut || [] });
     if (Panel.id() === "vote") Panel.close();
     App.osd("Starting it in On Demand...", 8000);
     try { await OnDemand.play(playing.src, item, { at: t }); } catch (e) { App.osd(e.message || String(e), 4000); }
@@ -599,7 +685,7 @@
         text: "Make a Channel",
         info: {
           title: "Make a Channel",
-          desc: "A channel that plays one show around the clock, in order or shuffled, from your Plex or Jellyfin server. Everyone watching sees the same episode; pausing, seeking, Start Over, Previous, Skip and Play Next in Order go to a vote when more than one TV is on it. Pick the show, which seasons, and a name; skipping intros and credits is set on the channel afterwards.",
+          desc: "A channel that plays one show around the clock, in order or shuffled, from your Plex or Jellyfin server, or a YouTube channel's uploads or a playlist. Everyone watching sees the same episode; pausing, seeking, Start Over, Previous, Skip and Play Next in Order go to a vote when more than one TV is on it. Pick the show, which seasons, and a name; skipping intros and credits is set on the channel afterwards.",
         },
         act: makeDialog,
       });
@@ -609,11 +695,12 @@
       const e = entryAt(d, Date.now()), ep = e && d.eps[e.i];
       const src = sourceFor(d);
       out.push({
-        text: d.name, tag: (ch && ch.hidden ? "Hidden · " : "") + (d.order === "shuffle" ? "Shuffle" : "In Order"),
+        text: d.name, tag: (ch && ch.hidden ? "Hidden · " : "") + (isYT(d) ? "YouTube · " : "") + (d.order === "shuffle" ? "Shuffle" : "In Order"),
         cls: (ch && ch.hidden ? "off" : "") + (src ? "" : " warn"),
         info: {
           title: d.name, chan: ch ? `${ch.n} ${ch.call}` : "",
           desc: [
+            isYT(d) ? ytSummary(d) :
             `${d.show.title}${seasonsText(d)}: ${plural(d.eps.length, "episode")}, ${d.order === "shuffle" ? "shuffled" : "in order"}${skipText(d) ? `, ${skipText(d)}` : ""}, from ${d.src.name}`,
             ep ? `On now: ${[epCode(ep), ep.title && `"${ep.title}"`].filter(Boolean).join(" ")}` : "",
             src ? "" : `This TV can't play it: ${d.src.name} isn't in its On Demand (Settings, On Demand)`,
@@ -641,18 +728,20 @@
 
   function makeDialog() {
     const srcs = showSources();
-    if (!srcs.length) {
+    const from = srcs.map((s) => ({ label: s.name, act: () => findDialog(s, "") }));
+    if (C.youtube) from.push({ label: "YouTube: a Channel or Playlist", act: () => ytLinkDialog("") });
+    if (!from.length) {
       return Dialog.open({
         title: "Make a Channel",
         text: "Channels play shows from a Plex or Jellyfin server. Add yours in Settings, On Demand, first.",
         buttons: [{ label: "OK" }],
       });
     }
-    if (srcs.length === 1) return findDialog(srcs[0], "");
+    if (from.length === 1) return from[0].act();
     Dialog.open({
       title: "Make a Channel",
-      text: "Which server is the show on?",
-      buttons: srcs.map((s) => ({ label: s.name, act: () => findDialog(s, "") })).concat([{ label: "Cancel" }]),
+      text: "Where does the channel play from?" + (srcs.length ? "" : " (Plex and Jellyfin servers show here once they're in Settings, On Demand.)"),
+      buttons: from.concat([{ label: "Cancel" }]),
     });
   }
 
@@ -840,7 +929,8 @@
     });
   }
 
-  function channelDialog(d) {
+  function channelDialog(d, sel) {
+    if (isYT(d)) return ytChannelDialog(d, sel);
     const src = sourceFor(d);
     const needSrc = (fn) => async () => {
       if (!src) { Dialog.message(`This TV doesn't have ${d.src.name} in On Demand, so it can't look at the show's episodes.`, true); return false; }
@@ -969,7 +1059,7 @@
     let changed = false;
     try {
       for (const d of C.defs.slice()) {
-        if (Date.now() - (checked[d.id] || 0) < CHECK_EVERY) continue;
+        if (isYT(d) || Date.now() - (checked[d.id] || 0) < CHECK_EVERY) continue; // (the server looks at YouTube itself)
         const src = sourceFor(d);
         if (!src) continue;
         let eps;
@@ -999,6 +1089,172 @@
   }
   setTimeout(checkNew, 45e3);
   setInterval(checkNew, 15 * 60e3);
+
+  // ----------------------------------------------------------------- YouTube
+  /*
+   * A YouTube channel's uploads or a playlist. The server reads the list
+   * (YouTube doesn't let web pages), which can take a minute for a channel
+   * with thousands of videos: making the channel, or looking again, is a job
+   * on the server that this TV asks after, showing how far it's got. The
+   * server reads each list again every few hours for new uploads, and asks
+   * SponsorBlock where each video's sponsors and the like are, a little at a
+   * time (the guide shifts a little as it learns them).
+   */
+  const ytOrderLabels = (kind) => (kind === "playlist" ? ["Playlist Order", "Reverse Order"] : ["Oldest First", "Newest First"]);
+  const onOff = (b) => (b ? "On" : "Off");
+  function ytSummary(d) {
+    const y = d.yt || {};
+    const [fwd, back] = ytOrderLabels(y.kind);
+    const left = [!y.shorts && "shorts", !y.live && "live stream replays"].filter(Boolean);
+    return `YouTube ${y.kind === "playlist" ? "playlist" : "channel"} ${d.show.title}: ${plural(d.eps.length, "video")}` +
+      (y.vids > d.eps.length ? ` of ${y.vids}` : "") +
+      `, ${d.order === "shuffle" ? "shuffled" : (y.rev ? back : fwd).toLowerCase()}` +
+      (left.length ? `, without ${left.join(" or ")}` : "") +
+      `. Sponsors, self promotion and reminders to subscribe are left out (SponsorBlock)` +
+      (d.skip && d.skip.credits ? ", and end cards and credits" : "") + (d.skip && d.skip.intro ? ", and intro animations" : "");
+  }
+
+  /** Wait for a job on the server, showing how it's going. Its result. */
+  async function waitJob(job) {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 800));
+      let st;
+      try { st = await api("GET", `/api/channels/jobs/${job}`); } catch (e) { if (e.status === 404) throw e; continue; }
+      if (st.error) throw new Error(st.error);
+      if (st.done) return st.result || {};
+      if (st.msg) Dialog.message(st.msg);
+    }
+  }
+
+  function ytLinkDialog(url) {
+    Dialog.open({
+      title: "Make a Channel: YouTube",
+      text: "Paste a link to a YouTube channel (youtube.com/@name: it plays all of the channel's uploads) or to a playlist (youtube.com/playlist?list=...).",
+      fields: [{ id: "url", label: "Channel or playlist link", value: url, placeholder: "https://www.youtube.com/@name" }],
+      buttons: [
+        {
+          label: "Next",
+          act: async (v) => {
+            if (!v.url) { Dialog.message("Paste a link first.", true); return false; }
+            Dialog.message("Looking it up on YouTube...");
+            let r;
+            try { r = await api("POST", "/api/channels/youtube", { url: v.url }); } catch (e) { Dialog.message(e.message, true); return false; }
+            ytMakeDialog({ url: v.url, kind: r.kind, title: r.title, name: r.title.slice(0, 40), shorts: false, live: false });
+          },
+        },
+        { label: "Cancel" },
+      ],
+    });
+  }
+
+  /** The new channel's name, what it plays and its order. `o`: { url, kind, title, name, shorts, live }. */
+  function ytMakeDialog(o, sel) {
+    const [fwd, back] = ytOrderLabels(o.kind);
+    const toggle = (k) => (v) => { o.name = v.name; o[k] = !o[k]; ytMakeDialog(o, k === "shorts" ? 1 : 2); };
+    const make = (order, rev) => async (v) => {
+      const name = (v.name || "").trim();
+      if (!name) { Dialog.message("Give the channel a name.", true); return false; }
+      Dialog.message("Making the channel...");
+      let r;
+      try {
+        const { job } = await api("POST", "/api/channels", {
+          name, order, src: { type: "youtube" }, yt: { url: o.url, shorts: o.shorts, live: o.live, rev },
+        });
+        r = await waitJob(job);
+      } catch (e) { Dialog.message(e.message, true); return false; }
+      await changedNow();
+      const ch = App.all.find((c) => c.custom === r.id);
+      App.osd(`Made ${name}: ${plural(r.n || 0, "video")}${ch ? `, channel ${ch.n}` : ""}. SponsorBlock's skips are added over the next few minutes.`, 6000);
+    };
+    Dialog.open({
+      title: "Make a Channel: YouTube",
+      text: `${o.kind === "playlist" ? "Playlist" : "Channel"}: ${o.title}. ` +
+        `Choose its name, whether it plays shorts and live stream replays, and its order. ` +
+        (o.kind === "playlist" ? "" : "Big channels take a minute to read. ") +
+        "Sponsors, self promotion, reminders to subscribe, and end cards and credits are skipped (SponsorBlock); that and the rest can be changed on the channel afterwards.",
+      fields: [{ id: "name", label: "Channel name", value: o.name }],
+      buttons: [
+        { label: `Shorts: ${onOff(o.shorts)}`, act: toggle("shorts") },
+        { label: `Live Stream Replays: ${onOff(o.live)}`, act: toggle("live") },
+        { label: `Make Channel: ${fwd}`, act: make("order", false) },
+        { label: `Make Channel: ${back}`, act: make("order", true) },
+        { label: "Make Channel: Shuffled", act: make("shuffle", false) },
+        { label: "Cancel" },
+      ],
+      sel,
+    });
+  }
+
+  /** A YouTube channel's settings. `sel`: the button to start on (after a change). */
+  function ytChannelDialog(d, sel) {
+    const y = d.yt || {};
+    const [fwd, back] = ytOrderLabels(y.kind);
+    const buttons = [];
+    const add = (label, act) => buttons.push(act ? { label, act } : { label });
+    // a change, then this dialog again (as the channel is now), on the same button
+    const toggle = (label, body, done) => {
+      const at = buttons.length;
+      add(label, async () => {
+        Dialog.message("Saving...");
+        try { await api("PATCH", `/api/channels/${d.id}`, body); } catch (e) { Dialog.message(e.message, true); return false; }
+        await changedNow();
+        if (done) App.osd(done, 4000);
+        const now = byId(d.id);
+        if (now) ytChannelDialog(now, at);
+      });
+    };
+    add("Watch", () => {
+      if (!App.tuneKey("chan|" + d.id)) { Dialog.message("This channel is hidden from the guide. Show it again in Settings, Channels.", true); return false; }
+      App.watch();
+    });
+    if (C.edit) {
+      add("Rename", () => renameDialog(d));
+      toggle(`Order: ${d.order === "shuffle" ? "Shuffled" : "In Order"}`, { order: d.order === "shuffle" ? "order" : "shuffle" },
+        `${d.name}: ${d.order === "shuffle" ? "in order" : "shuffled"}, after this video`);
+      toggle(`In Order: ${y.rev ? back : fwd}`, { yt: { rev: !y.rev } },
+        `${d.name}: ${(y.rev ? fwd : back).toLowerCase()}${d.order === "shuffle" ? " (for Play Next in Order; it's shuffled)" : ", after this video"}`);
+      toggle(`Shorts: ${onOff(y.shorts)}`, { yt: { shorts: !y.shorts } });
+      toggle(`Live Stream Replays: ${onOff(y.live)}`, { yt: { live: !y.live } });
+      toggle(`Skip End Cards and Credits: ${onOff(d.skip && d.skip.credits)}`, { skip: Object.assign({}, d.skip, { credits: !(d.skip && d.skip.credits) }) });
+      toggle(`Skip Intro Animations: ${onOff(d.skip && d.skip.intro)}`, { skip: Object.assign({}, d.skip, { intro: !(d.skip && d.skip.intro) }) });
+      add("Look for New Videos", async () => {
+        Dialog.message("Reading the list from YouTube...");
+        let r;
+        try { r = await waitJob((await api("POST", `/api/channels/${d.id}/refresh`)).job); } catch (e) { Dialog.message(e.message, true); return false; }
+        await changedNow();
+        App.osd(r.fresh || r.gone ? `${d.name}: ${plural(r.fresh || 0, "new video")}${r.gone ? `, ${r.gone} gone` : ""}` : `${d.name}: no new videos`, 4000);
+      });
+      add("Remove", () => Dialog.confirm("Remove Channel", `Remove ${d.name} for everyone?`, "Remove", async () => {
+        try { await api("DELETE", `/api/channels/${d.id}`); } catch (e) { Dialog.message(e.message, true); return false; }
+        await changedNow();
+        App.osd(`Removed ${d.name}`, 3000);
+      }));
+    }
+    add("Cancel");
+    Dialog.open({
+      title: d.name,
+      text: ytSummary(d) + ". Skip Intro Animations off: a Skip Intro button shows during them instead." +
+        (y.bad ? ` ${plural(y.bad, "video")} YouTube won't play outside youtube.com ${y.bad === 1 ? "is" : "are"} left out.` : ""),
+      buttons,
+      sel,
+    });
+  }
+
+  // YouTube for On Demand: Continue in On Demand plays the video on its own,
+  // in YouTube's player (pause, seek), skipping its sponsors (above). It's
+  // never a source of its own, so it has no setup and nothing to report.
+  OnDemand.register("youtube", {
+    label: "YouTube",
+    setup: [],
+    describe: () => "YouTube",
+    play: async (src, it, opts) => ({
+      url: "", yt: it.id, start: (opts && opts.at) || 0, dur: it.dur, subs: [],
+      markers: { intro: it.intro || null, credits: it.credits || null }, cut: it.cut || [],
+    }),
+    report() {},
+    stopped() {},
+    setWatched() {},
+  });
 
   // ------------------------------------------------------------------- api
   window.Channels = {
