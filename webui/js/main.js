@@ -23,7 +23,9 @@
  *                  (its first rows are On Demand and Search; Down past the last channel
  *                   jumps back to them)
  * Anywhere:        F1 settings
- *                  (custom channels, see channels.js: the controls have Start Over and Skip)
+ *                  (custom channels, see channels.js: the controls have Vote, and
+ *                   play/pause and ◀▶ ask everyone watching to pause or seek)
+ *                  Skip Intro / Skip Credits over the picture: OK presses it, Back hides it
  * Mouse:           click a listing to select it, click again to tune · wheel scrolls
  *                  click the picture to watch; while watching, move the mouse
  *                  for the control bar, double-click for full screen
@@ -855,7 +857,7 @@
    */
   const CTL_MS = 8000;
   const ALL_BTNS = Array.from(pb.root.querySelectorAll(".pb-btn"));
-  /** The buttons showing (Start Over and Skip only on custom channels). */
+  /** The buttons showing (Vote only on custom channels). */
   const btns = () => ALL_BTNS.filter((b) => !b.classList.contains("off"));
   const ctl = { on: false, row: "bar", btn: 0 };
   const btnIdx = (a) => Math.max(0, btns().findIndex((b) => b.dataset.act === a));
@@ -865,7 +867,7 @@
     voteButtons(playing());
     if (!ctl.on || act) {
       ctl.on = true;
-      ctl.row = Player.range() && !act ? "bar" : "btns";
+      ctl.row = range() && !act ? "bar" : "btns";
       ctl.btn = act ? btnIdx(act) : 0;
     }
     if (!bannerHold) hideBanner(); // the bar would jump when it timed out
@@ -877,7 +879,7 @@
   }
   function renderCtl() {
     const on = ctl.on && pbarShown();
-    if (on && ctl.row === "bar" && !Player.range()) ctl.row = "btns";
+    if (on && ctl.row === "bar" && !range()) ctl.row = "btns";
     pb.root.classList.toggle("focus-bar", on && ctl.row === "bar");
     const shown = btns();
     ALL_BTNS.forEach((b) => b.classList.toggle("focus", on && ctl.row === "btns" && b === shown[ctl.btn]));
@@ -892,7 +894,7 @@
       else if (nav === "left" || nav === "right") act.skip((nav === "left" ? -1 : 1) * (e.repeat ? 30 : 10));
       else if (nav === "ok") act.play();
     } else {
-      if (nav === "down" && Player.range()) ctl.row = "bar";
+      if (nav === "down" && range()) ctl.row = "bar";
       else if (nav === "left" || nav === "right") moveBtn(nav === "left" ? -1 : 1);
       else if (nav === "ok") {
         const b = btns()[ctl.btn];
@@ -904,23 +906,44 @@
   }
 
   /*
+   * Where the picture can go. A custom channel is the same moment for
+   * everyone, so its span is the episode on the channel's time (intro
+   * left out when it's skipped), and letting go of the marker asks everyone
+   * watching to go there (see channels.js); otherwise, the player's.
+   */
+  const chanSeek = () => (Player.ch && Player.ch.custom && !S.vod ? Channels.seekInfo() : null);
+  function range() {
+    const c = chanSeek();
+    return c ? (c.paused ? null : { vod: true, start: c.start, end: c.end, custom: true }) : Player.range();
+  }
+  function nowTime() { const c = chanSeek(); return c ? c.t : Player.time(); }
+  function clampTime(t) {
+    const r = range();
+    return r && r.custom ? U.clamp(t, r.start, r.end - 5) : Player.clampTime(t);
+  }
+
+  /*
    * Seeking with the arrows moves the marker at once but seeks only once
    * they've been let go of for a moment, so holding one down (or tapping it
-   * a few times) doesn't send the player a seek per key repeat.
+   * a few times) doesn't send the player a seek per key repeat. (A custom
+   * channel waits a little longer: each seek there is a vote.)
    */
   let scrub = null, scrubTimer = 0;
   function scrubBy(sec) {
-    const from = scrub != null ? scrub : Player.time();
-    const t = Player.clampTime(from + sec);
+    const from = scrub != null ? scrub : nowTime();
+    const t = clampTime(from + sec);
     if (t == null) return false;
     scrub = t;
     clearTimeout(scrubTimer);
-    scrubTimer = setTimeout(() => endScrub(true), 350);
+    scrubTimer = setTimeout(() => endScrub(true), chanSeek() ? 1200 : 350);
     return true;
   }
   function endScrub(seek) {
     clearTimeout(scrubTimer);
-    if (seek && scrub != null) Player.seekTo(scrub);
+    if (seek && scrub != null) {
+      if (chanSeek()) Channels.seek(scrub);
+      else Player.seekTo(scrub);
+    }
     scrub = null;
   }
 
@@ -961,10 +984,15 @@
     pb.title.style.maxWidth = Math.max(160, pb.root.offsetWidth - 30 - pb.chan.offsetWidth - 20) + "px";
     fitText(pb.title, !p || p.empty ? ch.name : p.title, true);
 
-    const r = Player.range();
+    const r = range();
+    const cs = chanSeek();
     let left = "", right = "", frac = 1, pos = "";
-    const t = scrub != null ? scrub : Player.time();
-    if (r && r.vod) {
+    const t = scrub != null ? scrub : nowTime();
+    if (cs && cs.paused) {
+      left = "0:00"; right = U.fmtDur(cs.end);
+      pos = `Paused ${U.fmtDur(Math.max(0, (cs.until - now) / 1000))}`;
+      frac = cs.t / cs.end;
+    } else if (r && r.vod) {
       left = "0:00"; right = U.fmtDur(r.end); pos = U.fmtDur(t);
       frac = (t - r.start) / (r.end - r.start);
     } else if (r) {
@@ -987,9 +1015,9 @@
     pb.pos.textContent = pos;
 
     let state = "play";
-    if (Player.paused() && Player.canPause()) state = "pause";
+    if ((Player.paused() && Player.canPause()) || (cs && cs.paused)) state = "pause";
     if (flash.until > now) state = flash.dir < 0 ? "rew" : "ff";
-    pb.state.setAttribute("d", Player.canPause() ? ICON[state] : "");
+    pb.state.setAttribute("d", Player.canPause() || cs ? ICON[state] : "");
 
     // tab hangs under the marker, kept inside the bar
     const trackX = pb.track.offsetLeft, trackW = pb.track.offsetWidth;
@@ -1000,17 +1028,18 @@
     voteButtons(ch);
     renderCtl();
   }
-  /** Start Over and Skip: on custom channels, with how a vote stands. */
+  /** Vote: on custom channels, with how a vote stands. */
   function voteButtons(ch) {
     const custom = !!(ch && ch.custom && !ch.vod);
-    for (const [act, what] of [["startOver", "restart"], ["skipEp", "skip"]]) {
-      const b = pb.root.querySelector(`[data-act="${act}"]`);
-      b.classList.toggle("off", !custom);
-      if (custom) b.textContent = Channels.voteText(what);
-    }
+    const b = pb.root.querySelector('[data-act="vote"]');
+    b.classList.toggle("off", !custom);
+    if (custom) b.textContent = Channels.voteText();
     ctl.btn = U.clamp(ctl.btn, 0, btns().length - 1);
   }
-  App.refreshControls = () => { if (pbarShown()) renderPbar(); };
+  App.refreshControls = () => {
+    if (pbarShown()) renderPbar();
+    if (Panel.id() === "vote") Panel.refresh();
+  };
 
   // ----------------------------------------------------------------- actions
   let osdTimer = 0;
@@ -1026,19 +1055,26 @@
   const fmtOffset = (o) => (o > 0 ? "+" : o < 0 ? "-" : "") + Math.abs(o).toFixed(1) + "s";
   const act = {
     play() {
+      // a custom channel: ask everyone watching to pause it (or go on)
+      if (chanSeek()) { Channels.pauseKey(); showPbar(); return; }
       if (!Player.togglePause()) return;
       showPbar();
     },
     /** Jump `sec` seconds (negative: back). */
     skip(sec) {
+      const cs = chanSeek();
       if (scrubBy(sec)) flash = { dir: Math.sign(sec), until: Date.now() + 900 };
+      else if (cs && cs.paused) osd("It's paused for everyone: resume it first (play, or Vote, Resume)", 3000);
       else osd(sec < 0 ? "Rewind isn't available on this channel" : "Fast forward isn't available on this channel");
       showPbar();
     },
     rew() { act.skip(-10); },
-    /** Custom channels: start the episode over, or skip it (a vote when other TVs are watching). */
-    async startOver() { await Channels.vote("restart"); if (pbarShown()) renderPbar(); },
-    async skipEp() { await Channels.vote("skip"); if (pbarShown()) renderPbar(); },
+    /** Custom channels: Start Over, Previous, Skip, Play Next in Order (a vote when other TVs are watching). */
+    vote(o) {
+      if (!(Player.ch && Player.ch.custom) && Panel.id() !== "vote") return;
+      togglePanel("vote", o && o.fromCtl);
+      if (Panel.id() === "vote") Channels.poke();
+    },
     ff() { act.skip(10); },
     cc() {
       const v = S.vod;
@@ -1223,6 +1259,7 @@
   const PANELS = {
     subs: { title: "Subtitle Options", rows: subtitleRows },
     screen: { title: "Display Options", rows: screenRows },
+    vote: { title: "Vote", rows: () => Channels.voteRows() },
   };
   function togglePanel(id, fromCtl) {
     if (Panel.id() === id) return Panel.close();
@@ -1253,6 +1290,10 @@
       else if (App.mode === "vod") OnDemand.open();
     }
     if (type === "cc" || type === "tracks" || type === "size") Panel.refresh();
+    // the Vote panel: only on a custom channel, and its rows follow the episode
+    if (type === "state" && Panel.id() === "vote") {
+      if (Player.ch && Player.ch.custom) Panel.refresh(); else Panel.close();
+    }
   });
 
   $("file-sub").addEventListener("change", async (e) => {
@@ -1270,11 +1311,45 @@
     }
   }
 
+  // ---------------------------------------------------- skip intro / credits
+  /*
+   * Skip Intro and Skip Credits, as Plex shows them: a button over the
+   * picture while an On Demand title (ondemand.js) or a custom channel
+   * (channels.js, where it's a vote) is in its intro or end credits. OK
+   * presses it (unless the controls are open), a click too; Back hides it
+   * until the next one.
+   */
+  const skipEl = $("skip-pop");
+  let skipNow = null, skipHidden = "";
+  function skipPopNow() {
+    if (App.mode !== "watch" || Panel.isOpen()) return null;
+    const p = S.vod ? OnDemand.skipPop() : Player.ch && Player.ch.custom ? Channels.skipPop() : null;
+    return p && p.key !== skipHidden ? p : null;
+  }
+  function renderSkip() {
+    skipNow = skipPopNow();
+    skipEl.classList.toggle("show", !!skipNow);
+    if (skipNow) skipEl.textContent = skipNow.label;
+  }
+  setInterval(renderSkip, 500);
+  function pressSkip() {
+    const p = skipNow;
+    if (!p) return;
+    skipHidden = p.key;
+    renderSkip();
+    p.go();
+  }
+  skipEl.addEventListener("click", (e) => { e.stopPropagation(); pressSkip(); });
+
   // ------------------------------------------------------------------- input
   function keyWatch(e, k) {
     const c = k.length === 1 ? k.toLowerCase() : k;
     const nav = U.nav(e);
     if (ctl.on && pbarShown() && keyCtl(e, nav)) return true;
+    if (skipNow && skipEl.classList.contains("show")) {
+      if (nav === "ok") { pressSkip(); return true; }
+      if (nav === "back") { skipHidden = skipNow.key; renderSkip(); return true; }
+    }
     if (e.shiftKey && c === "c") { act.subs(); return true; }
     if (e.shiftKey && c === "f") { act.screen(); return true; }
     if (nav === "ok") { openCtl(); return true; }
@@ -1440,7 +1515,10 @@
     b.addEventListener("click", (e) => { e.stopPropagation(); act[b.dataset.act](); }));
   pb.track.addEventListener("click", (e) => {
     const r = pb.track.getBoundingClientRect();
-    if (Player.seekFrac((e.clientX - r.left) / r.width)) showPbar();
+    const f = U.clamp((e.clientX - r.left) / r.width, 0, 1);
+    const cr = chanSeek() && range();
+    if (cr) { Channels.seek(clampTime(cr.start + f * (cr.end - cr.start))); showPbar(); }
+    else if (Player.seekFrac(f)) showPbar();
   });
   $("banner").addEventListener("click", hideBanner);
 

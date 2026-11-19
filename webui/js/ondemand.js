@@ -847,6 +847,48 @@
     if (pick) showSub(ch, pick).catch(() => {});
   }
 
+  // ------------------------------------------------------- skipping, as Plex
+  /*
+   * Skip Intro and Skip Credits: while a title is in its intro or its end
+   * credits (markers from Plex, or Jellyfin's media segments), main.js shows
+   * a button over the picture; OK presses it. Skip Credits goes on to the
+   * show's next episode, or for the last one (and movies) to the end.
+   */
+  function skipPop() {
+    const v = App.vod();
+    const m = v && v.play && v.play.markers;
+    if (!m || Player.ch !== v || Player.loading || Player.error) return null;
+    const t = Player.time(), end = v.dur || Infinity;
+    if (m.intro && t >= m.intro[0] && t < m.intro[1] - 1) {
+      return { key: `intro|${v.key}|${m.intro[0]}`, label: "Skip Intro", go: () => Player.seekTo(m.intro[1]) };
+    }
+    if (m.credits && t >= m.credits && t < end - 2) {
+      const ep = v.item.type === "episode" && v.item.showId;
+      return { key: `credits|${v.key}|${m.credits}`, label: ep ? "Skip Credits" : "Skip to the End", go: () => skipCredits(v) };
+    }
+    return null;
+  }
+  /** On to the next episode (or the end, when there isn't one). */
+  async function skipCredits(v) {
+    const toEnd = () => { if (App.vod() === v) Player.seekTo(v.dur || Player.time() + 1e6); };
+    const it = v.item;
+    if (it.type !== "episode" || !it.showId || !providers[v.src.type].episodes) return toEnd();
+    App.osd("Getting the next episode...", 8000);
+    try {
+      const key = (e) => [e.season == null ? 1e6 : e.season, e.episode == null ? 1e6 : e.episode];
+      const eps = (await providers[v.src.type].episodes(v.src, { id: it.showId, type: "show", title: it.show }))
+        .sort((a, b) => { const [x, y] = [key(a), key(b)]; return x[0] - y[0] || x[1] - y[1]; });
+      const i = eps.findIndex((e) => e.id === it.id);
+      const next = i >= 0 ? eps[i + 1] : null;
+      if (App.vod() !== v) return;
+      if (!next) { App.osd("That was the last episode", 3000); return toEnd(); }
+      await play(v.src, next, { fromStart: true });
+      App.osd(`Next: ${epCode(next)}${next.title ? ` "${next.title}"` : ""}`, 3000);
+    } catch (e) {
+      App.osd(e.message || String(e), 4000);
+    }
+  }
+
   // ------------------------------------------------------------- subtitles
   /** A text subtitle file from the server, shown by our own subtitle display. */
   async function showSub(ch, sub) {
@@ -1056,5 +1098,8 @@
     stopped,
     subOn,
     chooseSub,
+    skipPop,
+    /** Play a title from a source (custom channels' Continue in On Demand). */
+    play,
   };
 })();

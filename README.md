@@ -110,10 +110,25 @@ whether it plays in order or shuffled (shuffled plays every episode once before
 any repeats). The channel then runs around the clock, with listings in the
 guide, and everyone who tunes in sees the same episode at the same moment.
 
-Like live TV there's no pausing or seeking. Instead, the controls (OK while
-watching) have **Start Over** and **Skip**. If yours is the only TV on the
-channel, they happen right away. With others watching, they're a vote: when
-more than half of the TVs agree (or the others leave), it happens for everyone.
+Everyone sees the same moment, so pausing and seeking are for everyone:
+play/pause asks to pause the channel for a few minutes (up to 5; it goes on by
+itself, or when whoever paused it presses play again), and ◀▶ on the control
+bar picks a point in the episode to go to. The controls (OK while watching)
+also have **Vote**, with **Start Over**, **Previous** (the episode before,
+then this one again from the start), **Skip**, **Play Next in Order** (the
+show's next episode after this one, even on a shuffled channel, for
+two-parters; then the shuffle carries on), and **Pause** / **Resume**. If
+yours is the only TV on the channel, they happen right away. With others
+watching, they're a vote: when more than half of the TVs agree (or the others
+leave), it happens for everyone. **Continue in On Demand** (in Vote) plays the
+episode on its own from the same point, to pause and fast forward just for you.
+
+Admins can have a channel skip intros and end credits (the channel's settings:
+**Skip Intros**, **Skip Credits**), using where Plex (or Jellyfin 10.10's media
+segments) says they are; the schedule leaves them out. Otherwise a **Skip
+Intro** or **Skip Credits** button shows over the picture during them, as in
+Plex (a vote too). On Demand shows the same buttons; Skip Credits goes on to
+the show's next episode.
 
 Each TV plays the episodes through its own On Demand sign-in to that server, so
 people need it in **Settings > On Demand** (group settings carry it). Channels

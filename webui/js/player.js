@@ -182,6 +182,7 @@
 
   // --------------------------------------------------------------- loading
   function play() {
+    if (P.held) return; // (a custom channel, paused for everyone)
     const p = video.play();
     if (p && p.catch) {
       p.catch((e) => {
@@ -201,7 +202,7 @@
     P.autoMuted = false;
     video.muted = false;
     if (P.frame) P.load(P.ch, true); // an embed only takes sound when it loads
-    else if (P.ch && !P.error) video.play().catch(() => {});
+    else if (P.ch && !P.error && !P.held) video.play().catch(() => {});
     emit("unmuted");
   };
 
@@ -385,6 +386,7 @@
     teardown();
     if (!isReload) { P.reloads = 0; resetCC(); }
     P.ch = ch;
+    P.held = false;
     P.startAt = at != null ? at : (ch && ch.start) || 0;
     P.error = "";
     tv.classList.remove("nosignal");
@@ -621,6 +623,20 @@
     return true;
   };
   P.skip = (sec) => P.seekTo(video.currentTime + sec);
+  /** Custom channels, which can't be paused or seeked by hand: hold the
+   *  picture still (paused for everyone), or go on. */
+  P.hold = (on) => {
+    if (!!P.held === !!on) return;
+    P.held = !!on;
+    if (on) video.pause(); else if (P.ch && !P.error && !P.loading) play();
+    emit("state");
+  };
+  /** ...and go to a point in the episode (a vote to seek, or over the intro). */
+  P.jump = (t) => {
+    if (!P.ch || P.error || P.loading || !(t >= 0)) return false;
+    video.currentTime = t;
+    return true;
+  };
   P.seekFrac = (f) => {
     const r = P.range();
     return !!r && P.seekTo(r.start + f * (r.end - r.start));

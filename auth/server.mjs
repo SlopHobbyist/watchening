@@ -28,13 +28,15 @@
  *                                  (see channels.mjs, webui/js/channels.js):
  *     GET    ?from&to[&rev]          every channel and its schedule ({ same }
  *                                    when rev is still the latest)
- *     POST   {name, src, show, seasons, order, eps}    make one (admins)
- *     PATCH  /:id {name, seasons, order, eps}  DELETE /:id   (admins)
+ *     POST   {name, src, show, seasons, order, skip, eps}    make one (admins)
+ *     PATCH  /:id {name, seasons, order, skip, eps}  DELETE /:id   (admins)
  *     POST   /:id/watch {viewer}     this TV is watching (every few seconds):
  *                                    who else is, and the votes
  *     POST   /:id/leave {viewer}     it's stopped
- *     POST   /:id/vote {viewer, action: restart|skip, pos}   start the
- *                                    episode over, or skip it
+ *     POST   /:id/vote {viewer, action, start, arg}   action: restart, prev,
+ *                                    skip, next (in order, after this one),
+ *                                    seek (arg {to}: seconds in), pause
+ *                                    (arg {min}), resume
  *     POST   /:id/unvote {viewer}
  *
  * On first start (no accounts yet) it makes an admin account with a random
@@ -544,7 +546,7 @@ async function channelsApi(req, res, rest) {
       if (action === "watch") return send(res, 200, Channels.watch(id, v, name));
       if (action === "leave") { Channels.leave(id, v); return send(res, 204); }
       if (action === "unvote") return send(res, 200, Channels.unvote(id, v));
-      return send(res, 200, Channels.vote(id, v, name, b.action, Number.isInteger(b.pos) ? b.pos : null));
+      return send(res, 200, Channels.vote(id, v, name, b.action, Number.isInteger(b.pos) ? b.pos : null, Number.isFinite(b.start) ? b.start : null, b.arg));
     }
     throw new HttpError(405, "Not allowed");
   } catch (e) {

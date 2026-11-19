@@ -7,11 +7,18 @@
  *
  * Playing one: the episode on now, from the right point, through this TV's
  * own On Demand connection to that server (the source with the same server
- * id). When it ends, the next one on the schedule. Like live TV, there's no
- * pausing or seeking; the control bar has Start Over and Skip instead. Alone
- * on the channel, they happen at once; with other TVs watching, they're a
- * vote, carried out when more than half the TVs agree (the others see it
- * coming up on screen). Votes change the schedule for everyone.
+ * id). When it ends, the next one on the schedule. Everyone sees the same
+ * moment, so pausing and seeking are for everyone: play/pause asks to pause
+ * it for a few minutes, the control bar's ◀▶ to go to another point, and its
+ * Vote button has Start Over, Previous (that one, then this one again),
+ * Skip, Play Next in Order (the show's next episode after this one, even
+ * when shuffled: for two-parters), Pause and Resume. Alone on the channel,
+ * they happen at once; with other TVs watching, they're a vote, carried out
+ * when more than half the TVs agree (the others see it coming up on screen).
+ * Votes change the schedule for everyone. Skip Intro and Skip Credits show
+ * over the picture as Plex's do (a vote too), unless the channel skips them
+ * itself (an admin's setting: the schedule leaves them out). Continue in On
+ * Demand (in Vote) plays the episode on its own, from the same point.
  *
  * While a channel is on (in the picture or the guide's), this TV says so to
  * the server every few seconds, and hears who else is watching and how a vote
@@ -95,19 +102,45 @@
   const byId = (id) => C.defs.find((d) => d.id === id) || null;
   /** This TV's On Demand source for a channel's server. */
   const sourceFor = (d) => OnDemand.sources().find((s) => s.type === d.src.type && s.server && s.server.id === d.src.server) || null;
-  /** What's on a channel at time t: { start, end, i (its episode), pos } */
+  /** What's on a channel at time t: { start, end, i (its episode), pos, off
+   *  (how far into the episode it starts, the channel's seconds), pause } */
   function entryAt(d, t) {
     const a = d.sched;
     let lo = 0, hi = a.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (a[mid][1] <= t) lo = mid + 1;
-      else if (a[mid][0] > t) hi = mid - 1;
-      else return { start: a[mid][0], end: a[mid][1], i: a[mid][2], pos: a[mid][3] };
+      const x = a[mid];
+      if (x[1] <= t) lo = mid + 1;
+      else if (x[0] > t) hi = mid - 1;
+      else return { start: x[0], end: x[1], i: x[2], pos: x[3], off: x[4] || 0, pause: !!x[5] };
     }
     return null;
   }
   const epCode = (ep) => (ep.season != null && ep.episode != null ? `S${ep.season} E${ep.episode}` : "");
+
+  /*
+   * The channel's time and the video's: with Skip Intros on, a channel's
+   * episode leaves its intro out (and with Skip Credits, stops where the end
+   * credits start), so seconds into the episode on the channel aren't
+   * seconds into the video. (The same sums as the server's.)
+   */
+  function cutsOf(d, ep) {
+    const s = d.skip || {};
+    const end = s.credits && ep.credits ? ep.credits : ep.dur;
+    const intro = s.intro && ep.intro && ep.intro[1] < end ? ep.intro : null;
+    return { intro, end };
+  }
+  /** An episode's length on the channel (s). */
+  const chanDur = (d, ep) => { const c = cutsOf(d, ep); return c.end - (c.intro ? c.intro[1] - c.intro[0] : 0); };
+  /** The channel's seconds into an episode -> the video's. */
+  const toMedia = (d, ep, x) => { const c = cutsOf(d, ep); return c.intro && x >= c.intro[0] ? x + c.intro[1] - c.intro[0] : x; };
+  /** ...and back (inside a skipped intro: where it starts). */
+  const fromMedia = (d, ep, t) => {
+    const c = cutsOf(d, ep);
+    return !c.intro || t < c.intro[0] ? t : Math.max(c.intro[0], t - (c.intro[1] - c.intro[0]));
+  };
+  /** How far into its episode entry `e` is at `now` (the channel's seconds). */
+  const chanAt = (e, now) => (e.pause ? e.off : e.off + Math.max(0, now - e.start) / 1000);
 
   // ------------------------------------------------------------ in the guide
   /** The channel-like objects for the guide (main.js gives them numbers and listings). */
@@ -129,11 +162,11 @@
   function programs(id) {
     if (progs.has(id)) return progs.get(id);
     const d = byId(id);
-    const out = !d ? [] : d.sched.map(([start, end, i, pos]) => {
+    const out = !d ? [] : d.sched.map(([start, end, i, pos, , paused]) => {
       const ep = d.eps[i] || {};
       const code = epCode(ep);
       return {
-        title: d.show.title || d.name, sub: ep.title || "", start, end, pos, cat: "",
+        title: d.show.title || d.name, sub: (ep.title || "") + (paused ? " (Paused)" : ""), start, end, pos, cat: "",
         rating: ep.rating || "", desc: [code && `(${code})`, ep.desc].filter(Boolean).join(" "),
       };
     });
@@ -142,7 +175,7 @@
   }
 
   // ----------------------------------------------------------------- playing
-  /** What's playing: { id, pos, start, end, src, pl, subs } */
+  /** What's playing: { id, i, pos, start, end, off, pause, src, pl, subs, markers } */
   let playing = null, resolving = 0;
 
   function release() {
@@ -170,16 +203,16 @@
     const p = OnDemand.providers[src.type];
     const ep = d.eps[e.i];
     const item = { id: ep.id, type: "episode", title: ep.title, show: d.show.title, season: ep.season, episode: ep.episode, dur: ep.dur };
-    const pl = await p.play(src, item, { at: Math.max(0, (Date.now() - e.start) / 1000), burn: null });
+    const pl = await p.play(src, item, { at: toMedia(d, ep, chanAt(e, Date.now())), burn: null });
     if (my !== resolving) {
       // changed channel meanwhile
       if (p.release) p.release(src, pl);
       throw new Error("Tuning...");
     }
     release();
-    playing = { id, pos: e.pos, start: e.start, end: e.end, src, pl, subs: pl.subs || [], subsDone: false };
+    playing = Object.assign({ id, src, pl, subs: pl.subs || [], subsDone: false, markers: pl.markers || null }, e);
     // (starting it took a moment: begin that much further in)
-    return { url: pl.url, ours: !!pl.ours, start: Math.max(0, (Date.now() - e.start) / 1000) };
+    return { url: pl.url, ours: !!pl.ours, start: toMedia(d, ep, chanAt(e, Date.now())) };
   }
 
   /** Start what's on now again (the next episode, or the schedule moved),
@@ -192,14 +225,29 @@
     Player.setOffset(off);
   }
 
+  /** The schedule has moved on to entry `e`: if it's the episode playing (a
+   *  pause starting or ending, a vote to seek or start over), go on with the
+   *  same video from the right point. false if it's another episode. */
+  function follow(d, e) {
+    if (e.i !== playing.i) return false;
+    // after a long pause the server may have stopped making the stream: start it afresh
+    if (playing.pause && !e.pause && Date.now() - playing.start > 60e3) return false;
+    Object.assign(playing, { pos: e.pos, start: e.start, end: e.end, off: e.off, pause: e.pause });
+    const t = toMedia(d, d.eps[e.i], chanAt(e, Date.now()));
+    if (Math.abs(Player.time() - t) > 2) Player.jump(t);
+    Player.hold(e.pause);
+    return true;
+  }
+
   /** After the schedule changes: if the picture is behind it, catch up. */
   function catchUp() {
     const ch = Player.ch;
     if (!ch || !ch.custom || Player.loading || !playing || playing.id !== ch.custom) return;
     const d = byId(ch.custom);
-    if (!d) return;
-    const e = entryAt(d, Date.now());
-    if (!e || e.pos !== playing.pos || e.start !== playing.start) retune(ch);
+    const e = d && entryAt(d, Date.now());
+    if (!e) return;
+    if (e.pos !== playing.pos || e.start !== playing.start) { if (!follow(d, e)) retune(ch); }
+    else playing.end = e.end;
   }
 
   /** A text subtitle file from the server, shown by the player. */
@@ -238,8 +286,15 @@
     errAt = 0;
     if (!playing || playing.id !== id) return;
     // the episode's time is up, or a vote (or an admin) moved the schedule: catch up
-    const d = byId(id), e = d && entryAt(d, Date.now());
-    if (Date.now() >= playing.end || (e && (e.pos !== playing.pos || e.start !== playing.start))) return retune(ch);
+    const d = byId(id), now = Date.now(), e = d && entryAt(d, now);
+    if (!d) return;
+    if (e && (e.pos !== playing.pos || e.start !== playing.start)) { if (!follow(d, e)) return retune(ch); }
+    else if (!e && now >= playing.end) return retune(ch);
+    else if (e) playing.end = e.end;
+    Player.hold(playing.pause);
+    // Skip Intros: over the intro as it comes
+    const c = cutsOf(d, d.eps[playing.i]), t = Player.time();
+    if (c.intro && !playing.pause && t >= c.intro[0] - 0.5 && t < c.intro[1] - 1) Player.jump(c.intro[1]);
     if (!playing.subsDone) {
       playing.subsDone = true;
       const sub = playing.subs.find((s) => s.url && s.selected) || playing.subs.find((s) => s.url);
@@ -273,7 +328,29 @@
   }
   setInterval(beat, BEAT);
 
-  const VERB = { restart: "start this episode over", skip: "skip this episode" };
+  const ACTIONS = ["restart", "prev", "skip", "next", "seek", "pause", "resume"];
+  const NAME = {
+    restart: "Start Over", prev: "Previous", skip: "Skip", next: "Play Next in Order",
+    seek: "Go To", pause: "Pause", resume: "Resume",
+  };
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  /** What a vote asks for, as "want to ...". `v`: its tally (seek's to, pause's min). */
+  function verb(a, v) {
+    switch (a) {
+      case "restart": return "start this episode over";
+      case "prev": return "go back to the previous episode";
+      case "skip": return "skip this episode";
+      case "next": return "play the next episode in order after this one";
+      case "seek": return `go to ${U.fmtDur((v && v.to) || 0)} in this episode`;
+      case "pause": return `pause for ${plural((v && v.min) || 1, "minute")}`;
+      default: return "resume";
+    }
+  }
+  const DONE = {
+    restart: "Started over by vote", prev: "Back to the previous episode by vote",
+    skip: "Skipped to the next episode by vote", next: "By vote, the next episode in order plays after this one",
+    seek: "Moved by vote", pause: "Paused for everyone", resume: "Resumed",
+  };
   function onState(id, st) {
     if (id !== watchingId) return;
     C.state = Object.assign({ id }, st);
@@ -281,14 +358,19 @@
     // a vote passed (on another TV, or ours)
     if (st.done && st.done.at > lastDone) {
       lastDone = st.done.at;
-      App.osd(st.done.action === "skip" ? "Skipped to the next episode by vote" : "Started over by vote", 4000);
+      const p = st.pause;
+      App.osd(st.done.action === "pause" && p
+        ? `Paused for everyone${p.name ? ` by ${p.name}` : ""}: back in ${U.fmtDur(Math.max(0, (p.until - Date.now()) / 1000))}.` +
+          (p.mine ? " Press play (or Vote, Resume) to go on now." : "")
+        : DONE[st.done.action] || "Changed by vote", 5000);
     }
     // a vote someone else started: say so once, and as it changes
     let note = "";
-    for (const a of ["skip", "restart"]) {
+    for (const a of ACTIONS) {
       const v = st.votes && st.votes[a];
       if (v && v.n && !v.mine) {
-        note = `${v.n} of ${st.viewers} TVs want to ${VERB[a]} (${v.need} needed). To agree: OK, then ${a === "skip" ? "Skip" : "Start Over"}.`;
+        const who = a === "pause" && v.name ? `${v.name} wants` : `${v.n} of ${st.viewers} TVs want`;
+        note = `${who} to ${verb(a, v)} (${v.need} needed). To agree: OK, then Vote, ${a === "seek" ? `Go to ${U.fmtDur(v.to)}` : NAME[a]}.`;
         break;
       }
     }
@@ -296,28 +378,48 @@
     lastNote = note;
     if (App.refreshControls) App.refreshControls();
   }
+  /** Ask the server how things stand now (the Vote panel opening). */
+  const poke = () => beat();
 
-  /** Start Over or Skip, from the control bar: a vote, carried out at once
-   *  when this TV is the only one watching. Again takes the vote back. */
-  async function vote(action) {
+  /** The state for the channel in the picture, if the server has said. */
+  const stateNow = () => (C.state && Player.ch && C.state.id === Player.ch.custom ? C.state : null);
+  /** The channel playing here, its episode and what's playing: or null while it starts. */
+  function here() {
+    const ch = Player.ch;
+    if (!ch || !ch.custom || !playing || playing.id !== ch.custom || Player.loading) return null;
+    const d = byId(ch.custom);
+    return d ? { ch, d, ep: d.eps[playing.i] } : null;
+  }
+
+  /** A vote, carried out at once when this TV is the only one watching.
+   *  Asking for the same again takes it back. `arg`: seek { to }, pause { min }. */
+  async function vote(action, arg) {
     const ch = Player.ch;
     if (!ch || !ch.custom) return;
-    if (!playing || playing.id !== ch.custom || Player.loading) return App.osd("The channel is still starting", 2500);
-    const st = C.state && C.state.id === ch.custom ? C.state : null;
+    if (!here()) return App.osd("The channel is still starting", 2500);
+    const st = stateNow();
+    const v = st && st.votes[action];
+    const same = !arg || !v || (action === "seek" ? Math.abs((v.to == null ? -9 : v.to) - arg.to) <= 1 : v.min === arg.min);
     try {
-      if (st && st.votes[action].mine) {
+      if (v && v.mine && same) {
         onState(ch.custom, await api("POST", `/api/channels/${ch.custom}/unvote`, { viewer }));
         return App.osd("Vote taken back", 2500);
       }
-      const r = await api("POST", `/api/channels/${ch.custom}/vote`, { viewer, action, pos: playing.pos });
+      const r = await api("POST", `/api/channels/${ch.custom}/vote`, { viewer, action, pos: playing.pos, start: playing.start, arg });
       if (r.applied) {
         lastDone = r.done ? r.done.at : Date.now();
-        App.osd(action === "skip" ? "Skipping to the next episode..." : "Starting the episode over...", 3000);
+        if (Panel.id() === "vote") Panel.close();
+        App.osd({
+          restart: "Starting the episode over...", prev: "Going back to the previous episode...",
+          skip: "Skipping to the next episode...", next: "The next episode in order plays after this one",
+          seek: `Going to ${U.fmtDur(arg ? arg.to : 0)}...`, pause: `Paused for everyone for ${plural(arg ? arg.min : 1, "minute")}`,
+          resume: "Resuming...",
+        }[action], 3000);
         onState(ch.custom, r);
         await refresh(true);
       } else {
-        const v = r.votes[action];
-        App.osd(`You voted to ${VERB[action]}: ${v.n} of the ${v.need} TVs needed so far. Press it again to take your vote back.`, 6000);
+        const t = r.votes[action];
+        App.osd(`You voted to ${verb(action, t)}: ${t.n} of the ${t.need} TVs needed so far. Ask again to take your vote back.`, 6000);
         onState(ch.custom, r);
       }
     } catch (e) {
@@ -326,13 +428,150 @@
     }
   }
 
-  /** The control bar's button text: "Skip", "Skip 1/2", "Skip ✓1/2" (voted). */
-  function voteText(action) {
-    const base = action === "skip" ? "Skip" : "Start Over";
-    const st = C.state;
-    const v = st && Player.ch && st.id === Player.ch.custom && st.votes && st.votes[action];
-    if (!v || !v.n || v.need <= 1) return base;
-    return `${base} ${v.mine ? "✓" : ""}${v.n}/${v.need}`;
+  /** How long a pause is asked for (minutes), remembered on this TV. */
+  const PAUSE_KEY = "iptv.channelPause";
+  let pauseMin = 5;
+  try { pauseMin = U.clamp(parseInt(localStorage.getItem(PAUSE_KEY), 10) || 5, 1, 5); } catch { /* */ }
+  function setPauseMin(m) {
+    pauseMin = U.clamp(m, 1, 5);
+    try { localStorage.setItem(PAUSE_KEY, String(pauseMin)); } catch { /* */ }
+  }
+  /** Play/pause on a custom channel: a vote to pause it (or resume it). */
+  function pauseKey() {
+    if (!here()) return;
+    if (playing.pause) vote("resume");
+    else vote("pause", { min: pauseMin });
+  }
+
+  /** For the control bar: the episode's length and where it's at, on the
+   *  channel's time (paused: and when it goes on). null while it starts. */
+  function seekInfo() {
+    const h = here();
+    if (!h || !h.ep || Player.error) return null;
+    return { start: 0, end: chanDur(h.d, h.ep), t: chanAt(playing, Date.now()), paused: !!playing.pause, until: playing.pause ? playing.end : 0 };
+  }
+  /** The control bar was scrubbed to `to` (the channel's seconds): a vote to go there. */
+  function seek(to) {
+    if (!here()) return;
+    if (playing.pause) return App.osd("It's paused: resume it first (play, or Vote, Resume)", 3000);
+    vote("seek", { to: Math.round(to) });
+  }
+
+  /** Skip Intro and Skip Credits, as Plex shows them: when the channel
+   *  doesn't skip them itself, a vote to go past the intro, or skip on. */
+  function skipPop() {
+    const h = here();
+    if (!h || !h.ep || Player.error || playing.pause) return null;
+    const { d, ep } = h, s = d.skip || {};
+    const m = playing.markers || ep;
+    const t = Player.time();
+    const many = stateNow() && stateNow().viewers > 1 ? " (Vote)" : "";
+    if (!s.intro && m.intro && t >= m.intro[0] && t < m.intro[1] - 1) {
+      return { key: `intro|${playing.start}`, label: "Skip Intro" + many, go: () => vote("seek", { to: Math.round(fromMedia(d, ep, m.intro[1])) }) };
+    }
+    if (!s.credits && m.credits && t >= m.credits && t < ep.dur - 2) {
+      return { key: `credits|${playing.start}`, label: "Skip Credits" + many, go: () => vote("skip") };
+    }
+    return null;
+  }
+
+  /** This episode, in On Demand, from where the picture is: to pause and
+   *  seek on your own. */
+  async function continueOnDemand() {
+    const h = here();
+    if (!h) return App.osd("The channel is still starting", 2500);
+    const { d, ep } = h;
+    const t = Player.time();
+    const item = {
+      id: ep.id, type: "episode", title: ep.title, show: d.show.title, season: ep.season, episode: ep.episode,
+      dur: ep.dur, desc: ep.desc, rating: ep.rating, aired: ep.aired, offset: t, watched: false, cat: "", showId: d.show.id,
+    };
+    if (Panel.id() === "vote") Panel.close();
+    App.osd("Starting it in On Demand...", 8000);
+    try { await OnDemand.play(playing.src, item, { at: t }); } catch (e) { App.osd(e.message || String(e), 4000); }
+  }
+
+  /** The control bar's button: "Vote", or "Vote 1/2" ("Vote ✓1/2": this TV
+   *  voted) while a vote is open. */
+  function voteText() {
+    const st = stateNow();
+    let best = null;
+    if (st && st.votes) for (const a of ACTIONS) { const v = st.votes[a]; if (v && v.n && (!best || v.n > best.n)) best = v; }
+    if (!best || best.need <= 1) return "Vote";
+    return `Vote ${best.mine ? "✓" : ""}${best.n}/${best.need}`;
+  }
+
+  const epName = (ep) => (ep ? [epCode(ep), ep.title && `"${ep.title}"`].filter(Boolean).join(" ") || "an episode" : "an episode");
+
+  /** The Vote panel's rows (main.js shows them). */
+  let lastProposal = "";
+  function voteRows() {
+    const h = here();
+    if (!h) return [{ label: "The channel is still starting", disabled: true }];
+    const { d } = h;
+    const st = stateNow();
+    const can = (st && st.can) || {};
+    const up = entryAt(d, playing.end);
+    const many = st && st.viewers > 1;
+    const tallyOf = (a) => (st && st.votes && st.votes[a]) || { n: 0, need: 1, mine: false };
+    const how = (v) => (!many ? " You're the only one watching, so it happens right away."
+      : ` With ${st.viewers} TVs watching, it's a vote: it happens when ${v.need} agree.`) +
+      (v.mine ? " You voted for this: choose it again to take your vote back." : "");
+    const count = (v) => (v.n && v.need > 1 ? `  ${v.n}/${v.need}` : "");
+    const row = (a, desc, why, label) => {
+      const v = tallyOf(a);
+      return {
+        label: (label || NAME[a]) + count(v), check: v.mine,
+        desc: why ? `${why}.` : desc + how(v),
+        act: () => (why ? App.osd(`${NAME[a]}: ${why}`, 3000) : vote(a)),
+      };
+    };
+    const ep = (r) => (r && r.i != null ? d.eps[r.i] : null);
+    const rows = [];
+    if (playing.pause) {
+      const p = (st && st.pause) || {};
+      const left = U.fmtDur(Math.max(0, (playing.end - Date.now()) / 1000));
+      rows.push(p.mine
+        ? { label: "Resume", desc: `You paused it: go on now, for everyone. Otherwise it goes on by itself in ${left}.`, act: () => vote("resume") }
+        : row("resume", `Paused${p.name ? ` by ${p.name}` : ""}; it goes on by itself in ${left}. Resume it sooner for everyone.`));
+    }
+    rows.push(
+      row("restart", "Start this episode again from the beginning."),
+      row("prev", can.prev && can.prev.why ? "" : `Go back to ${can.prev ? epName(ep(can.prev)) : "the episode before this one"}, then this one again from the start.`, can.prev && can.prev.why),
+      row("skip", `On to the next episode${up && !up.pause && up.i !== playing.i ? `, ${epName(d.eps[up.i])}` : ""}.`),
+      row("next", can.next && can.next.why ? "" :
+        `When this episode ends, play ${can.next ? epName(ep(can.next)) : "the show's next episode"}${d.order === "shuffle" ? ", even though the channel is shuffled, then carry on shuffling" : ""}. For two-parters.`,
+      can.next && can.next.why),
+    );
+    // a vote to go somewhere in the episode (from the control bar): agree to it here
+    const sv = tallyOf("seek");
+    if (sv.n && sv.to != null) {
+      rows.push({
+        label: `Go to ${U.fmtDur(sv.to)}${count(sv)}`, check: sv.mine,
+        desc: `Go to ${U.fmtDur(sv.to)} in this episode.` + how(sv) + " (◀▶ in the control bar picks another point.)",
+        act: () => vote("seek", { to: sv.to }),
+      });
+    }
+    if (!playing.pause) {
+      // someone asked for a length: start on theirs, so agreeing is one press
+      const pv = tallyOf("pause");
+      const prop = pv.n && !pv.mine ? `${pv.min}|${pv.n}` : "";
+      if (prop && prop !== lastProposal) pauseMin = pv.min;
+      lastProposal = prop;
+      rows.push({
+        label: "Pause" + count(pv), value: plural(pauseMin, "min"), check: pv.mine,
+        desc: (pv.n && !pv.mine ? `${pv.name || "Someone"} asked for ${plural(pv.min, "minute")}. ` : "") +
+          `Hold the picture still for everyone; it goes on by itself after the time you pick (◀▶, up to 5 minutes), or sooner if you resume it.` + how(pv),
+        step: (dd) => setPauseMin(pauseMin + dd),
+        act: () => vote("pause", { min: pauseMin }),
+      });
+    }
+    rows.push({ sep: true }, {
+      label: "Continue in On Demand",
+      desc: "Watch this episode on your own from here, in On Demand, where you can pause and fast forward. The channel goes on without you; when you stop, it comes back.",
+      act: continueOnDemand,
+    });
+    return rows;
   }
 
   // schedule changes made elsewhere, for the guide
@@ -342,7 +581,6 @@
 
   // --------------------------------------------------------------- settings
   const showSources = () => OnDemand.sources().filter((s) => TYPES.includes(s.type));
-  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
   function seasonsText(d) {
     const s = d.seasons;
     if (!s) return "";
@@ -361,7 +599,7 @@
         text: "Make a Channel",
         info: {
           title: "Make a Channel",
-          desc: "A channel that plays one show around the clock, in order or shuffled, from your Plex or Jellyfin server. Everyone watching sees the same episode; Start Over and Skip go to a vote when more than one TV is on it. Pick the show, which seasons, and a name.",
+          desc: "A channel that plays one show around the clock, in order or shuffled, from your Plex or Jellyfin server. Everyone watching sees the same episode; pausing, seeking, Start Over, Previous, Skip and Play Next in Order go to a vote when more than one TV is on it. Pick the show, which seasons, and a name; skipping intros and credits is set on the channel afterwards.",
         },
         act: makeDialog,
       });
@@ -376,7 +614,7 @@
         info: {
           title: d.name, chan: ch ? `${ch.n} ${ch.call}` : "",
           desc: [
-            `${d.show.title}${seasonsText(d)}: ${plural(d.eps.length, "episode")}, ${d.order === "shuffle" ? "shuffled" : "in order"}, from ${d.src.name}`,
+            `${d.show.title}${seasonsText(d)}: ${plural(d.eps.length, "episode")}, ${d.order === "shuffle" ? "shuffled" : "in order"}${skipText(d) ? `, ${skipText(d)}` : ""}, from ${d.src.name}`,
             ep ? `On now: ${[epCode(ep), ep.title && `"${ep.title}"`].filter(Boolean).join(" ")}` : "",
             src ? "" : `This TV can't play it: ${d.src.name} isn't in its On Demand (Settings, On Demand)`,
             C.edit ? "OK to watch or change it" : "OK to watch it",
@@ -470,7 +708,56 @@
   const epOut = (e) => ({
     id: e.id, title: e.title, season: e.season == null ? null : e.season, episode: e.episode == null ? null : e.episode,
     dur: e.dur, desc: String(e.desc || "").slice(0, 400), rating: e.rating || "", aired: e.aired || "",
+    intro: e.intro || null, credits: e.credits || null, mk: !!e.mk,
   });
+
+  /*
+   * Intros and end credits: a channel can skip them (Skip Intros, Skip
+   * Credits), so its TVs need to know where they are in every episode. Plex
+   * only says one episode at a time, so they're looked up when skipping is
+   * turned on, then kept with the episodes (mk: looked up), and new episodes
+   * are looked up as they're added.
+   */
+  const skipping = (d) => !!(d.skip && (d.skip.intro || d.skip.credits));
+  /** The show's episodes now, with the markers the channel already has for them. */
+  function keepMarks(d, eps) {
+    const had = new Map(d.eps.map((e) => [e.id, e]));
+    return eps.map((e) => {
+      const o = had.get(e.id);
+      return o && o.mk ? Object.assign({}, e, { intro: o.intro, credits: o.credits, mk: true }) : e;
+    });
+  }
+  /** Look up the markers of the episodes `want` picks (a few at a time). An
+   *  episode that couldn't be looked up is left to try again later. */
+  async function withMarkers(src, eps, want, progress) {
+    const p = OnDemand.providers[src.type];
+    if (!p.markers) throw new Error(`${src.name} can't say where intros and credits are`);
+    const out = eps.slice(), todo = [];
+    eps.forEach((e, k) => { if (want(e)) todo.push(k); });
+    let done = 0, failed = 0, next = 0;
+    const worker = async () => {
+      while (next < todo.length) {
+        const k = todo[next++];
+        try {
+          const m = await p.markers(src, out[k]);
+          out[k] = Object.assign({}, out[k], { intro: m.intro, credits: m.credits, mk: true });
+        } catch (e) {
+          if (e.auth) throw e;
+          failed++;
+        }
+        done++;
+        if (progress) progress(done, todo.length);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, todo.length) }, worker));
+    if (failed && failed === todo.length) throw new Error(`Couldn't get the intros and credits from ${src.name}`);
+    return out;
+  }
+  const markProgress = (done, n) => Dialog.message(`Finding the intros and credits: ${done} of ${n} episodes...`);
+  function skipText(d) {
+    const s = d.skip || {};
+    return s.intro && s.credits ? "skipping intros and credits" : s.intro ? "skipping intros" : s.credits ? "skipping credits" : "";
+  }
   /** The episodes in seasons first-last (last null: to the latest; first
    *  null: all, when the show has no season numbers). */
   function inSeasons(eps, first, last) {
@@ -524,7 +811,12 @@
       if (!d && !name) { Dialog.message("Give the channel a name.", true); return false; }
       Dialog.message(d ? "Saving..." : "Making the channel...");
       try {
-        if (d) await api("PATCH", `/api/channels/${d.id}`, { seasons: r.range, eps: r.picked.map(epOut) });
+        if (d) {
+          let picked = keepMarks(d, r.picked);
+          if (skipping(d)) picked = await withMarkers(src, picked, (e) => !e.mk, markProgress);
+          Dialog.message("Saving...");
+          await api("PATCH", `/api/channels/${d.id}`, { seasons: r.range, eps: picked.map(epOut) });
+        }
         else {
           await api("POST", "/api/channels", {
             name, order, seasons: r.range,
@@ -561,7 +853,8 @@
     };
     Dialog.open({
       title: d.name,
-      text: `${d.show.title}${seasonsText(d)}: ${plural(d.eps.length, "episode")}, ${d.order === "shuffle" ? "shuffled" : "in order"}, from ${d.src.name}.`,
+      text: `${d.show.title}${seasonsText(d)}: ${plural(d.eps.length, "episode")}, ${d.order === "shuffle" ? "shuffled" : "in order"}` +
+        `${skipText(d) ? `, ${skipText(d)}` : ""}, from ${d.src.name}.`,
       buttons: [
         {
           label: "Watch",
@@ -576,16 +869,26 @@
           act: patch({ order: d.order === "shuffle" ? "order" : "shuffle" }, d.order === "shuffle" ? `${d.name}: in order, after this episode` : `${d.name}: shuffled, after this episode`),
         },
         C.edit && { label: "Change Seasons", act: needSrc(() => seasonsDialog(src, d.show, d)) },
+        C.edit && { label: `Skip Intros: ${d.skip && d.skip.intro ? "On" : "Off"}`, act: () => setSkip(d, src, { intro: !(d.skip && d.skip.intro) }) },
+        C.edit && { label: `Skip Credits: ${d.skip && d.skip.credits ? "On" : "Off"}`, act: () => setSkip(d, src, { credits: !(d.skip && d.skip.credits) }) },
         C.edit && {
           label: "Look for New Episodes",
           act: needSrc(async () => {
             Dialog.message("Getting the episode list...");
             let eps;
-            try { eps = channelEps(d, await showEpisodes(src, d.show)); } catch (e) { Dialog.message(e.message, true); return false; }
+            try { eps = keepMarks(d, channelEps(d, await showEpisodes(src, d.show))); } catch (e) { Dialog.message(e.message, true); return false; }
             if (!eps.length) { Dialog.message("None of the channel's episodes are on the server any more.", true); return false; }
+            // skipping: also look again at episodes the server hadn't found an intro or credits in
+            let marked = 0;
+            if (skipping(d)) {
+              const before = eps;
+              try { eps = await withMarkers(src, eps, (e) => !e.mk || (!e.intro && !e.credits), markProgress); } catch (e) { Dialog.message(e.message, true); return false; }
+              marked = eps.filter((e, k) => String(e.intro) !== String(before[k].intro) || e.credits !== before[k].credits).length;
+            }
             const { fresh, gone } = diffEps(d, eps);
-            if (!fresh && !gone) { Dialog.message(`No new episodes: still ${plural(d.eps.length, "episode")}.`, true); return false; }
-            return patch({ eps: eps.map(epOut) }, `${d.name}: ${plural(fresh, "new episode")}${gone ? `, ${gone} gone` : ""}`)();
+            if (!fresh && !gone && !marked) { Dialog.message(`No new episodes: still ${plural(d.eps.length, "episode")}.`, true); return false; }
+            return patch({ eps: eps.map(epOut) }, `${d.name}: ${plural(fresh, "new episode")}${gone ? `, ${gone} gone` : ""}` +
+              (marked ? `, ${plural(marked, "intro or credits")} found` : ""))();
           }),
         },
         C.edit && {
@@ -599,6 +902,25 @@
         { label: "Cancel" },
       ].filter(Boolean),
     });
+  }
+
+  /** Skip Intros, Skip Credits: on or off (`change`: { intro } or { credits }).
+   *  Turning one on looks up where they are first, if that hasn't been done. */
+  async function setSkip(d, src, change) {
+    const skip = Object.assign({ intro: false, credits: false }, d.skip, change);
+    let eps = d.eps;
+    if ((skip.intro || skip.credits) && eps.some((e) => !e.mk)) {
+      if (!src) { Dialog.message(`This TV doesn't have ${d.src.name} in On Demand, so it can't find the intros and credits.`, true); return false; }
+      try { eps = await withMarkers(src, eps, (e) => !e.mk, markProgress); } catch (e) { Dialog.message(e.message, true); return false; }
+    }
+    Dialog.message("Saving...");
+    try { await api("PATCH", `/api/channels/${d.id}`, { skip, eps: eps.map(epOut) }); } catch (e) { Dialog.message(e.message, true); return false; }
+    await changedNow();
+    const what = change.intro !== undefined ? "intros" : "credits";
+    const n = eps.filter((e) => (what === "intros" ? e.intro : e.credits)).length;
+    App.osd(change[what === "intros" ? "intro" : "credits"]
+      ? `${d.name}: skipping ${what} (${n} of ${plural(eps.length, "episode")} have them), after this episode`
+      : `${d.name}: playing ${what} again, after this episode`, 5000);
   }
 
   function renameDialog(d) {
@@ -651,10 +973,16 @@
         const src = sourceFor(d);
         if (!src) continue;
         let eps;
-        try { eps = channelEps(d, await showEpisodes(src, d.show)); } catch { continue; } // try again next time
+        try { eps = keepMarks(d, channelEps(d, await showEpisodes(src, d.show))); } catch { continue; } // try again next time
+        // skipping intros or credits: find them in the new episodes
+        let marked = 0;
+        if (skipping(d) && eps.some((e) => !e.mk)) {
+          try { eps = await withMarkers(src, eps, (e) => !e.mk); } catch { continue; }
+          marked = eps.filter((e) => e.mk && !(d.eps.find((x) => x.id === e.id) || {}).mk).length;
+        }
         checked[d.id] = Date.now();
         const { fresh, gone, same } = diffEps(d, eps);
-        if (same || !eps.length || gone > d.eps.length / 2) continue;
+        if ((same && !marked) || !eps.length || gone > d.eps.length / 2) continue;
         try {
           await api("PATCH", `/api/channels/${d.id}`, { eps: eps.map(epOut) });
           changed = true;
@@ -679,6 +1007,12 @@
     programs,
     vote,
     voteText,
+    voteRows,
+    poke,
+    pauseKey,
+    seekInfo,
+    seek,
+    skipPop,
     /** The playing channel's subtitle file, if it has one (for C). */
     subFile: () => (playing && Player.ch && playing.id === Player.ch.custom ? playing.subs.find((s) => s.url) || null : null),
     showSub,

@@ -226,6 +226,7 @@
       aired: m.originallyAvailableAt || "",
       cat: catOf(type, genres, ctx && ctx.cat),
       lib: m.librarySectionID != null ? String(m.librarySectionID) : "",
+      showId: type === "episode" && m.grandparentRatingKey != null ? String(m.grandparentRatingKey) : "",
     };
     if (ctx && ctx.mixed && it.show) it.label = `${it.show}: ${it.title}`;
     return it;
@@ -349,6 +350,26 @@
     });
   }
 
+  /** Where a title's intro and end credits are (seconds), from its Plex
+   *  markers: { intro: [start, end] | null, credits: start | null }. Credits
+   *  are the last ones (Plex's "final"), not a mid-show sequence. */
+  function markersOf(m) {
+    const list = m.Marker || [];
+    const dur = (m.duration || 0) / 1000;
+    const intro = list.find((x) => x.type === "intro");
+    const creds = list.filter((x) => x.type === "credits");
+    const end = creds.find((x) => x.final) || creds.filter((x) => x.endTimeOffset / 1000 >= dur - 30).pop();
+    return {
+      intro: intro ? [intro.startTimeOffset / 1000, intro.endTimeOffset / 1000] : null,
+      credits: end ? end.startTimeOffset / 1000 : null,
+    };
+  }
+  /** A title's markers (Plex only gives them one title at a time). */
+  async function markers(src, it) {
+    const m = ((await pms(src, `/library/metadata/${it.id}`, { includeMarkers: 1 })).Metadata || [])[0];
+    return m ? markersOf(m) : { intro: null, credits: null };
+  }
+
   // ---------------------------------------------------------------- playing
   const TEXT_SUBS = /^(srt|subrip|vtt|webvtt)$/i;
   /** Files a browser plays as they are. */
@@ -367,7 +388,7 @@
    */
   async function play(src, it, opts) {
     const s = src.server;
-    const m = ((await pms(src, `/library/metadata/${it.id}`)).Metadata || [])[0];
+    const m = ((await pms(src, `/library/metadata/${it.id}`, { includeMarkers: 1 })).Metadata || [])[0];
     if (!m) throw new Error("Plex couldn't find that title");
     const media = (m.Media || [])[0];
     const part = media && (media.Part || [])[0];
@@ -386,7 +407,7 @@
     const q = await OnDemand.streamQuality(src, opts, url(s.uri, part.key, { "X-Plex-Token": s.token }));
     // rate: about what the stream will use (kbps), for stepping down if it's too much
     const rate = media.bitrate ? Math.min(media.bitrate, q.kbps) : q.kbps;
-    const base = { start, dur, subs, burn, part: part.id, auto: q.auto, rate };
+    const base = { start, dur, subs, burn, part: part.id, auto: q.auto, rate, markers: markersOf(m) };
 
     const fits = !media.bitrate || media.bitrate <= q.kbps;
     if (!burn && fits && browserPlays(media, part)) {
@@ -571,7 +592,7 @@
       return `Plex Media Server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
     reconnect,
-    root, views, list, search, play, release, setSubtitle, episodes, trailer,
+    root, views, list, search, play, release, setSubtitle, episodes, trailer, markers,
     /** A show's logo (its clearLogo, small, through Plex's image resizer), for the guide. */
     logo(src, showId) {
       return url(src.server.uri, "/photo/:/transcode", {

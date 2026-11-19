@@ -182,6 +182,7 @@
       cat: catOf(type, m.Genres || [], ctx && ctx.cat),
       lib: (ctx && ctx.lib) || "",
       series: m.SeriesId || "", // a season's show, to list its episodes
+      showId: type === "episode" ? m.SeriesId || "" : "",
     };
     if (ctx && ctx.mixed && it.show) it.label = `${it.show}: ${it.title}`;
     return it;
@@ -445,6 +446,23 @@
    * stream to draw in; undefined: whatever Jellyfin picks for this title and
    * user, null: none) }
    */
+  /** Where a title's intro and end credits are (seconds), from Jellyfin's
+   *  media segments (10.10 and later; none before): { intro: [start, end] |
+   *  null, credits: start | null }. Credits: an outro that runs to the end. */
+  async function markers(src, it) {
+    const none = { intro: null, credits: null };
+    let r;
+    try { r = await api(src, `/MediaSegments/${it.id}`, {}); } catch (e) { if (e.auth || e.net) throw e; return none; }
+    const segs = (r && r.Items) || [];
+    const dur = it.dur || 0;
+    const intro = segs.find((x) => x.Type === "Intro");
+    const outro = segs.filter((x) => x.Type === "Outro" && (!dur || x.EndTicks / TICKS >= dur - 30)).pop();
+    return {
+      intro: intro ? [intro.StartTicks / TICKS, intro.EndTicks / TICKS] : null,
+      credits: outro ? outro.StartTicks / TICKS : null,
+    };
+  }
+
   async function play(src, it, opts) {
     if (aio(src)) return aioPlay(src, it, opts);
     const s = src.server;
@@ -455,9 +473,10 @@
       AllowVideoStreamCopy: true, AllowAudioStreamCopy: true, AutoOpenLiveStream: true,
     };
     if (opts.burn !== undefined) body.SubtitleStreamIndex = opts.burn == null ? -1 : opts.burn;
-    const [m, info] = await Promise.all([
+    const [m, info, marks] = await Promise.all([
       api(src, `/Items/${it.id}`, user(src)),
       api(src, `/Items/${it.id}/PlaybackInfo`, {}, { method: "POST", body, timeout: 30000 }),
+      markers(src, it).catch(() => null),
     ]);
     if (info.ErrorCode) throw new Error(ERRORS[info.ErrorCode] || `Jellyfin can't play this title (${info.ErrorCode})`);
     const ms = (info.MediaSources || [])[0];
@@ -473,7 +492,7 @@
     let burn = opts.burn;
     if (burn === undefined) { const sel = subs.find((x) => x.selected && !x.url); burn = sel ? sel.id : null; }
     const rate = ms.Bitrate ? Math.min(ms.Bitrate / 1000, q.kbps) : q.kbps;
-    const base = { start, dur, subs, burn, session: info.PlaySessionId || "", source: ms.Id, auto: q.auto, rate };
+    const base = { start, dur, subs, burn, session: info.PlaySessionId || "", source: ms.Id, auto: q.auto, rate, markers: marks };
 
     if (ms.SupportsDirectPlay) {
       const boxes = String(ms.Container || "").toLowerCase().split(",");
@@ -862,7 +881,7 @@
     describe(src) {
       return `Jellyfin server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
-    root, views, list, search, play, release, episodes, trailer,
+    root, views, list, search, play, release, episodes, trailer, markers,
     /** A show's logo, for the guide. */
     logo(src, showId) {
       return url(src.server.uri, `/Items/${showId}/Images/Logo`, { maxHeight: 96, format: "Png", ApiKey: src.server.token });
