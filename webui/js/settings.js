@@ -153,7 +153,7 @@
       text: "Picture Quality", tag: q.label,
       info: {
         title: "Picture Quality", chan: q.label,
-        desc: "Original plays files as they are where the browser can, and has the server convert only what it can't. A lower setting has the server shrink the picture for a slow connection.",
+        desc: "Automatic measures how fast the server reaches this TV and has it send no more than that, lowering the picture if the connection slows down while you watch (watching away from home, a server's upload is usually the limit). Original plays files as they are where the browser can, and has the server convert only what it can't. A lower setting has the server shrink the picture to at most that.",
       },
       act: () => {
         const list = OnDemand.QUALITY;

@@ -84,6 +84,32 @@
   P.on = (fn) => listeners.push(fn);
   const emit = (type, data) => listeners.forEach((fn) => fn(type, data));
 
+  /*
+   * How the stream is arriving. hls.js: the piece loading now (frag; its
+   * stats grow as it comes) and the speed of the last one (kbps, at), which
+   * is also sent out as "bw" (On Demand's Automatic quality). Native: the
+   * <video> element's "progress". movedAt: when more data last came in.
+   */
+  let net = { frag: null, seen: 0, movedAt: 0, kbps: 0, at: 0 };
+  const resetNet = () => { net = { frag: null, seen: 0, movedAt: 0, kbps: 0, at: 0 }; };
+  /** Data came in during the last 5 seconds: slow, not stuck. */
+  function arriving() {
+    const f = net.frag;
+    if (f && f.stats.loaded !== net.seen) { net.seen = f.stats.loaded; net.movedAt = Date.now(); }
+    return Date.now() - net.movedAt < 5000;
+  }
+  video.addEventListener("progress", () => (net.movedAt = Date.now()));
+  /** kbps the stream is arriving at: the piece coming in now (once it has
+   *  been coming a moment), else the last one, from the last 30s; 0: unknown. */
+  P.netRate = () => {
+    const f = net.frag;
+    if (f && f.stats.loading.first) {
+      const ms = performance.now() - f.stats.loading.first;
+      if (ms > 1500) return (f.stats.loaded * 8) / ms;
+    }
+    return net.at && Date.now() - net.at < 30000 ? net.kbps : 0;
+  };
+
   // ------------------------------------------------------------ stream type
   function kind(url) {
     const s = String(url);
@@ -223,6 +249,7 @@
       try { video.load(); } catch { /* */ }
     }
     if (P.frame) { P.frame.remove(); P.frame = null; }
+    resetNet();
     P.live = false;
     P.how = "";
     P.proxied = false;
@@ -232,7 +259,15 @@
   function attempt(how, url, my) {
     return new Promise((resolve, reject) => {
       const ctx = { done: false, finish };
-      const timer = setTimeout(() => finish(new Error("The stream didn't respond")), 30000);
+      // An On Demand title still arriving over a slow connection gets longer
+      // (giving up would start its download again, elsewhere)
+      const t0 = Date.now();
+      let timer;
+      const wait = (ms) => (timer = setTimeout(() => {
+        if (P.ch && P.ch.vod && arriving() && Date.now() - t0 < 120000) wait(5000);
+        else finish(new Error("The stream didn't respond"));
+      }, ms));
+      wait(30000);
       function finish(err) {
         if (ctx.done) return;
         ctx.done = true;
@@ -286,6 +321,19 @@
           hls.audioTrack = pick.i;
         });
         hls.on(Hls.Events.FRAG_BUFFERED, () => (retries = 0));
+        hls.on(Hls.Events.FRAG_LOADING, (_, d) => { if (P.hls === hls) net.frag = d.frag; });
+        hls.on(Hls.Events.FRAG_LOADED, (_, d) => {
+          if (P.hls !== hls) return;
+          if (net.frag === d.frag) net.frag = null;
+          net.movedAt = Date.now();
+          // timed from the first bytes: a server still making the piece isn't a slow connection
+          const st = d.frag.stats, ms = st.loading.end - st.loading.first;
+          if (st.loaded > 200e3 && ms > 30) {
+            net.kbps = (st.loaded * 8) / ms;
+            net.at = Date.now();
+            emit("bw", net.kbps);
+          }
+        });
         hls.on(Hls.Events.ERROR, (_, d) => {
           if (!d.fatal || P.hls !== hls) return;
           const msg = hlsError(d);
@@ -436,7 +484,10 @@
    * frames it has already buffered; a tiny seek gets it going.
    */
   let stuckSince = 0, frozenSince = 0, lastT = -1, stallT = -1, stallSince = 0;
+  /** How long (ms) the picture has been waiting for the stream while playing. */
+  P.stalledFor = () => (stallSince && P.ch && !P.error && !P.loading && !video.paused ? Date.now() - stallSince : 0);
   setInterval(() => {
+    const busy = arriving();
     // (a seek into the hole stays "seeking" forever, so that doesn't exempt us)
     if (!P.ch || P.error || P.loading || video.paused) {
       stuckSince = frozenSince = stallSince = 0;
@@ -446,9 +497,12 @@
     const t = video.currentTime, b = video.buffered;
 
     // Last resort, as VLC does: a picture that hasn't moved in 10s gets the
-    // stream reloaded (twice at most per tune).
+    // stream reloaded (twice at most per tune). Not while an On Demand title
+    // is still arriving, slowly: reloading would throw away what has come and
+    // have the server start it again (On Demand's Automatic quality steps
+    // down instead).
     if (t !== stallT) { stallT = t; stallSince = Date.now(); }
-    else if (Date.now() - stallSince > 10000 && P.reloads < 2) {
+    else if (Date.now() - stallSince > 10000 && P.reloads < 2 && !(P.ch.vod && busy)) {
       P.reloads++;
       stallSince = Date.now();
       P.load(P.ch, true);

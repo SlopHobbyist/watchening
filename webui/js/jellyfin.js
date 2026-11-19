@@ -447,7 +447,8 @@
    */
   async function play(src, it, opts) {
     if (aio(src)) return aioPlay(src, it, opts);
-    const s = src.server, q = OnDemand.quality();
+    const s = src.server;
+    const q = await OnDemand.streamQuality(src, opts, url(s.uri, `/Videos/${it.id}/stream`, { static: true, ApiKey: s.token }));
     const body = {
       UserId: s.userId, DeviceProfile: profile(q), MaxStreamingBitrate: q.kbps * 1000,
       EnableDirectPlay: true, EnableDirectStream: true, EnableTranscoding: true,
@@ -471,7 +472,8 @@
     // Jellyfin's own pick (the user's subtitle settings) is drawn in if it's a picture one
     let burn = opts.burn;
     if (burn === undefined) { const sel = subs.find((x) => x.selected && !x.url); burn = sel ? sel.id : null; }
-    const base = { start, dur, subs, burn, session: info.PlaySessionId || "", source: ms.Id };
+    const rate = ms.Bitrate ? Math.min(ms.Bitrate / 1000, q.kbps) : q.kbps;
+    const base = { start, dur, subs, burn, session: info.PlaySessionId || "", source: ms.Id, auto: q.auto, rate };
 
     if (ms.SupportsDirectPlay) {
       const boxes = String(ms.Container || "").toLowerCase().split(",");
@@ -483,7 +485,7 @@
     }
     if (!ms.TranscodingUrl) throw new Error("Jellyfin can't play this title in this browser");
     const t = new URL(s.uri.replace(/\/+$/, "") + ms.TranscodingUrl);
-    if (q.id !== "original") {
+    if (q.res && q.res !== "3840x2160") {
       const [w, h] = q.res.split("x");
       setParam(t, "maxWidth", w);
       setParam(t, "maxHeight", h);

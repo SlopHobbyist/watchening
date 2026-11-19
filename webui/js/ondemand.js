@@ -63,8 +63,13 @@
   const sources = () => Store.cfg.vod.sources.filter((s) => providers[s.type]);
 
   // Picture quality for streams a server converts (the most it may send).
+  // Automatic: what this TV's connection to the server carries (see
+  // streamQuality). "max" was "original" when Original was the default,
+  // which sent remote viewers more than a home connection uploads; those
+  // settings get Automatic now (which is Original on a fast connection).
   const QUALITY = [
-    { id: "original", label: "Original", kbps: 200000, res: "3840x2160" },
+    { id: "auto", label: "Automatic", kbps: 0, res: "" },
+    { id: "max", label: "Original", kbps: 200000, res: "3840x2160" },
     { id: "20", label: "20 Mbps 1080p", kbps: 20000, res: "1920x1080" },
     { id: "12", label: "12 Mbps 1080p", kbps: 12000, res: "1920x1080" },
     { id: "8", label: "8 Mbps 1080p", kbps: 8000, res: "1920x1080" },
@@ -73,6 +78,85 @@
     { id: "1", label: "1.5 Mbps 480p", kbps: 1500, res: "854x480" },
   ];
   const quality = () => QUALITY.find((q) => q.id === Store.cfg.vod.quality) || QUALITY[0];
+
+  // ------------------------------------------------------------- bandwidth
+  /*
+   * Automatic quality needs to know how fast each server reaches this TV
+   * (kbps). It's measured as titles play (Player's "bw": each piece of an HLS
+   * stream as it arrives) and, when there's no recent measurement, by reading
+   * the start of the title's file for a couple of seconds before playing. Kept
+   * per TV, not in the synced settings: the same server is fast at home and
+   * slow from a friend's house.
+   */
+  const BW_KEY = "iptv.vod.bw.v1", BW_FRESH = 20 * 60e3;
+  const HEADROOM = 0.7;  // of the measured speed a stream may use (speeds vary; there's audio too)
+  const GUESS = 6000;    // when nothing could be measured
+  const FLOOR = 600;     // the least Automatic asks for
+  const bw = (() => { try { return JSON.parse(localStorage.getItem(BW_KEY) || "null") || {}; } catch { return {}; } })();
+  const freshBw = (src) => { const o = bw[src.id]; return o && Date.now() - o.at < BW_FRESH ? o.kbps : 0; };
+  /** A measurement: slower ones count for more, so a slowdown is noticed quickly. */
+  function noteBw(src, kbps, weight) {
+    const old = freshBw(src);
+    const w = weight != null ? weight : kbps < old ? 0.5 : 0.25;
+    bw[src.id] = { kbps: Math.round(old ? old * (1 - w) + kbps * w : kbps), at: Date.now() };
+    try { localStorage.setItem(BW_KEY, JSON.stringify(bw)); } catch { /* */ }
+  }
+  /** Read the start of `href` for about two seconds: kbps, or 0. */
+  async function probe(href) {
+    const ctl = new AbortController();
+    const give = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const res = await fetch(href, { signal: ctl.signal, cache: "no-store" });
+      if (!res.ok || !res.body) return 0;
+      const rd = res.body.getReader();
+      let t0 = 0, bytes = 0, ms = 0;
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        const now = performance.now();
+        if (!t0) { t0 = now; continue; } // timed from the first bytes, not the wait for them
+        bytes += value.length;
+        ms = now - t0;
+        if (ms > 2000 || bytes > 16e6) break;
+      }
+      return ms > 100 && bytes > 256e3 ? (bytes * 8) / ms : 0;
+    } catch {
+      return 0;
+    } finally {
+      clearTimeout(give);
+      ctl.abort();
+    }
+  }
+  /** Most a stream may use for `kbps` of connection: { kbps, res, auto } */
+  function fitTo(kbps) {
+    kbps = Math.round(Math.max(FLOOR, Math.min(200000, kbps)));
+    const rung = QUALITY.find((x) => x.kbps && x.kbps <= kbps) || QUALITY[QUALITY.length - 1];
+    // a fast connection: the server keeps the picture's size
+    return { kbps, res: kbps >= 20000 ? "3840x2160" : rung.res, auto: true };
+  }
+  /**
+   * The most a title may be sent at, from `src`, for a provider's play():
+   * { kbps, res, auto }. The quality setting, or with Automatic, what this
+   * TV's connection carries: measured just now if it hasn't been lately
+   * (`probeUrl`: the title's file, read for a moment). opts.kbps: stepping
+   * down while it plays (see below).
+   */
+  async function streamQuality(src, opts, probeUrl) {
+    const q = quality();
+    if (q.id !== "auto") return { kbps: q.kbps, res: q.res, auto: false };
+    if (opts && opts.kbps) return fitTo(opts.kbps);
+    let kbps = freshBw(src);
+    if (!kbps) {
+      kbps = probeUrl ? await probe(probeUrl) : 0;
+      if (kbps) noteBw(src, kbps, 1);
+      else kbps = (bw[src.id] && bw[src.id].kbps) || GUESS;
+    }
+    return fitTo(kbps * HEADROOM);
+  }
+  Player.on((type, kbps) => {
+    const v = type === "bw" && App.vod();
+    if (v && Player.ch === v) noteBw(v.src, kbps);
+  });
 
   // ---------------------------------------------------------------- levels
   /*
@@ -804,6 +888,40 @@
     }
   }
 
+  // ------------------------------------------------------ stepping down
+  /*
+   * Automatic quality, while a title plays: when the picture has waited a few
+   * seconds for a stream arriving slower than it plays, the server sends it
+   * again a step down, from the same place, as Plex's own apps do. (Waiting
+   * with the stream arriving fast enough is something else: the player's
+   * own recovery deals with it.)
+   */
+  let lastStep = 0;
+  setInterval(async () => {
+    const v = App.vod();
+    if (!v || !v.play.auto || !v.play.rate || Player.ch !== v || Player.loading || Player.error) return;
+    if (Player.stalledFor() < 4000 || Date.now() - lastStep < 20000) return;
+    const have = Player.netRate() || freshBw(v.src);
+    if (!have || v.play.rate <= have * 0.85) return;
+    if (v.play.rate <= FLOOR) return; // as low as it goes
+    let cap = have * HEADROOM;
+    if (cap > v.play.rate * 0.8) cap = v.play.rate * 0.6; // a real step
+    lastStep = Date.now();
+    noteBw(v.src, have, 0.5);
+    const p = providers[v.src.type];
+    // subtitles shown from a file come back with it; drawn-in ones stay drawn in
+    const ext = Player.cc === Player.EXT ? v.subs.find((s) => s.url && s.label === Player.extName) : null;
+    try {
+      const pl = await p.play(v.src, v.item, { at: Player.time(), burn: v.burn, kbps: cap });
+      if (App.vod() !== v) { if (p.release) p.release(v.src, pl); return; }
+      if (p.release) p.release(v.src, v.play);
+      const ch = vodChannel(v.src, v.item, pl);
+      App.playVod(ch, true);
+      if (ext) showSub(ch, ext).catch(() => {});
+      App.osd(`Slow connection: picture lowered to ${(pl.rate / 1000).toFixed(1)} Mbps`, 4000);
+    } catch { /* keeps playing as it was */ }
+  }, 1000);
+
   // --------------------------------------------------------------- progress
   /*
    * While a title plays, its position goes to the server every 10 seconds
@@ -870,7 +988,7 @@
 
   // ------------------------------------------------------------------- api
   window.OnDemand = {
-    QUALITY, quality, fmtLen,
+    QUALITY, quality, streamQuality, fmtLen,
     providers,
     register(type, p) { providers[type] = p; },
     sources,

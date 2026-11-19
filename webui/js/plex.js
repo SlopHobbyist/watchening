@@ -19,6 +19,10 @@
  * say) and converts only the rest. Subtitle files next to the video are
  * shown by our own subtitle display; subtitles inside the video are drawn
  * into the picture by the transcoder. Progress goes to Plex as it plays.
+ * How much the server may send is the Picture Quality setting; Automatic
+ * measures the connection (see streamQuality in ondemand.js), as Plex's own
+ * apps do, so a viewer away from home isn't sent more than the server's
+ * upload carries.
  */
 (function () {
   "use strict";
@@ -378,9 +382,12 @@
     }));
     let burn = opts.burn;
     if (burn === undefined) { const sel = subs.find((x) => x.selected && !x.url); burn = sel ? sel.id : null; }
-    const base = { start, dur, subs, burn, part: part.id };
+    // (with Automatic quality, the file is also what the connection is measured with)
+    const q = await OnDemand.streamQuality(src, opts, url(s.uri, part.key, { "X-Plex-Token": s.token }));
+    // rate: about what the stream will use (kbps), for stepping down if it's too much
+    const rate = media.bitrate ? Math.min(media.bitrate, q.kbps) : q.kbps;
+    const base = { start, dur, subs, burn, part: part.id, auto: q.auto, rate };
 
-    const q = OnDemand.quality();
     const fits = !media.bitrate || media.bitrate <= q.kbps;
     if (!burn && fits && browserPlays(media, part)) {
       return Object.assign(base, { url: url(s.uri, part.key, { "X-Plex-Token": s.token }), session: "" });

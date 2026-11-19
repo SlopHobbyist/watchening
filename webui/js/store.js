@@ -44,7 +44,7 @@
     ccOffsets: {},   // channel key -> subtitle offset (seconds)
     screen: {},      // screen options for every channel: { aspect, scale, crop, overscan, splitScan, overscanY }
     screenCh: {},    // channel key -> screen options of its own
-    vod: { clientId: "", sources: [], quality: "original", views: {}, hiddenLibs: [] },
+    vod: { clientId: "", sources: [], quality: "auto", views: {}, hiddenLibs: [] },
   });
   /** What belongs to this TV, not to the person: the screen's shape and
    *  picture settings, the last channel, the id media servers know it by. */
