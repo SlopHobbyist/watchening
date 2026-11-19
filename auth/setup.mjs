@@ -145,7 +145,11 @@ const aio = {
   FORCE_PROXY_URL: ORIGIN,
   FORCE_PROXY_CREDENTIALS: `proxy:${secrets.aiostreamsProxy}`,
 };
-if (debridKey) aio.DEFAULT_SERVICE_CREDENTIALS = `${debridService}.apiKey=${debridKey}`;
+// The key from .env is used for every setup on its page, whatever is saved
+// there, and that field is hidden. (As a "default" instead, its page puts the
+// key in the field encrypted and the field can't be edited: what gets saved
+// isn't a key, and the debrid service refuses it.)
+if (debridKey) aio.FORCED_SERVICE_CREDENTIALS = `${debridService}.apiKey=${debridKey}`;
 write(`${DIR}/aiostreams.env`,
   "# Written by auth/setup.mjs from .env on every start. Don't edit; it's replaced.\n" +
   Object.entries(aio).map(([k, v]) => `${k}=${sq(v)}\n`).join(""), 0o600);

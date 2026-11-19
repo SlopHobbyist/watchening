@@ -81,8 +81,8 @@ TorBox, AllDebrid, Premiumize...), the way Stremio does, through
 1. Optionally put your debrid service and API key in `.env` (`DEBRID_SERVICE`,
    `DEBRID_API_KEY`), then `docker compose up -d`.
 2. On the server, open <http://localhost:3001/stremio/configure> and sign in
-   with `data/aiostreams-login.txt`. Add your debrid service (already filled
-   in if it's in `.env`), a catalog addon such as Cinemeta (what you browse
+   with `data/aiostreams-login.txt`. Add your debrid service (if its key is
+   in `.env`, it's already on and its key field is hidden), a catalog addon such as Cinemeta (what you browse
    and search) and one or more stream addons (Torrentio, Comet...), then
    **Save & Install**. Note the UUID and the password you chose.
 3. In Watchening: **Settings > On Demand > Sign In to Stremio**, with that UUID
