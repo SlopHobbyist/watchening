@@ -104,7 +104,8 @@ prefers versions that will.
 
 Make channels out of the shows on your Plex or Jellyfin server under
 **Settings > Custom Channels > Make a Channel** (admins). Pick the show, which
-seasons (so "old" and "new" Simpsons can be separate channels), a name, and
+seasons (so "old" and "new" Simpsons can be separate channels; a last season of
+`latest` takes in new seasons as they arrive), a name, and
 whether it plays in order or shuffled (shuffled plays every episode once before
 any repeats). The channel then runs around the clock, with listings in the
 guide, and everyone who tunes in sees the same episode at the same moment.
@@ -118,7 +119,10 @@ Each TV plays the episodes through its own On Demand sign-in to that server, so
 people need it in **Settings > On Demand** (group settings carry it). Channels
 are added after the others in the guide; move them with **Settings > Channels**.
 Watching a channel doesn't mark episodes as watched. New episodes on the server
-are picked up with **Look for New Episodes** on the channel. Channels are saved
+are added by themselves: an admin's TV checks each channel's show every six
+hours while the app is open (the accounts service doesn't talk to Plex or
+Jellyfin itself). To check right away, use **Look for New Episodes** on the
+channel. Channels are saved
 in `data/settings/channels.json`.
 
 ## Licenses

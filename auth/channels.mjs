@@ -26,7 +26,7 @@
  *
  * Kept in /data/settings/channels.json:
  *   { rev, channels: [{ id, name, src: { type, server, name }, show: { id, title },
- *     seasons: [first, last] | null, order: "order" | "shuffle", seed,
+ *     seasons: [first, last] | [first, null] (to the latest) | null (all), order: "order" | "shuffle", seed,
  *     eps: [{ id, title, season, episode, dur (s), desc, rating, aired }],
  *     anchor: { t, pos }, lead: { i, t } | null, created, by }] }
  * rev goes up with every change to a channel or its schedule, so TVs know to
@@ -208,10 +208,12 @@ function cleanOrder(v) {
 }
 function cleanSeasons(v) {
   if (v == null) return null;
-  if (!Array.isArray(v) || v.length !== 2 || !v.every((x) => Number.isInteger(x) && x >= 0 && x < 10000) || v[0] > v[1]) {
-    throw new ChannelError(400, "Seasons are [first, last]");
+  // (last: null for "to the latest season", so new seasons are taken in when they turn up)
+  const ok = (x) => Number.isInteger(x) && x >= 0 && x < 10000;
+  if (!Array.isArray(v) || v.length !== 2 || !ok(v[0]) || !(v[1] === null || ok(v[1])) || (v[1] !== null && v[0] > v[1])) {
+    throw new ChannelError(400, "Seasons are [first, last], last null for the latest");
   }
-  return v;
+  return [v[0], v[1]];
 }
 function cleanEps(v) {
   if (!Array.isArray(v)) throw new ChannelError(400, "Send the channel's episodes");
@@ -286,7 +288,15 @@ export function update(id, b, by) {
   let rerun = false;
   if (b.name !== undefined) ch.name = cleanName(b.name);
   if (b.seasons !== undefined) ch.seasons = cleanSeasons(b.seasons);
-  if (b.eps !== undefined) { ch.eps = cleanEps(b.eps); rerun = true; }
+  if (b.eps !== undefined) {
+    const eps = cleanEps(b.eps);
+    // the same episodes (a check for new ones that found none, or two TVs
+    // checking at once): take in any new titles and the like, but the
+    // schedule stays as it is
+    const same = eps.length === ch.eps.length && eps.every((e, i) => e.id === ch.eps[i].id && e.dur === ch.eps[i].dur);
+    ch.eps = eps;
+    if (!same) rerun = true;
+  }
   if (b.order !== undefined && cleanOrder(b.order) !== ch.order) {
     ch.order = b.order;
     ch.seed = crypto.randomBytes(8).toString("hex"); // a fresh shuffle

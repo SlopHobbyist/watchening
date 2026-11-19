@@ -18,6 +18,8 @@
  * stands. Other TVs pick up schedule changes within a minute.
  *
  * Making and changing channels (Settings, Custom Channels) is for admins.
+ * A channel's seasons can run to the latest one; admins' TVs look for new
+ * episodes every few hours (checkNew, below).
  * Watching a channel doesn't mark episodes watched on the media server.
  */
 (function () {
@@ -344,6 +346,7 @@
   function seasonsText(d) {
     const s = d.seasons;
     if (!s) return "";
+    if (s[1] == null) return `, season ${s[0]} to the latest`;
     return s[0] === s[1] ? `, season ${s[0]}` : `, seasons ${s[0]}-${s[1]}`;
   }
 
@@ -468,11 +471,14 @@
     id: e.id, title: e.title, season: e.season == null ? null : e.season, episode: e.episode == null ? null : e.episode,
     dur: e.dur, desc: String(e.desc || "").slice(0, 400), rating: e.rating || "", aired: e.aired || "",
   });
-  /** The episodes in seasons first-last (or all, when the show has no season numbers). */
+  /** The episodes in seasons first-last (last null: to the latest; first
+   *  null: all, when the show has no season numbers). */
   function inSeasons(eps, first, last) {
     if (first == null) return eps;
-    return eps.filter((e) => e.season != null && e.season >= first && e.season <= last);
+    return eps.filter((e) => e.season != null && e.season >= first && (last == null || e.season <= last));
   }
+  /** A channel's episodes, from the show's list now. */
+  const channelEps = (d, eps) => (d.seasons ? inSeasons(eps, d.seasons[0], d.seasons[1]) : eps);
 
   /**
    * Choose the seasons (and, for a new channel, the name and order). `d`: an
@@ -488,24 +494,29 @@
     const regular = seasons.filter((s) => s > 0);
     const has = seasons.length > 0;
     const first = d && d.seasons ? d.seasons[0] : regular.length ? regular[0] : seasons[0];
-    const last = d && d.seasons ? d.seasons[1] : seasons[seasons.length - 1];
+    // (new channels go to the latest season unless told otherwise, so new seasons join them)
+    const last = d && d.seasons ? d.seasons[1] : null;
     const fields = [];
     if (!d) fields.push({ id: "name", label: "Channel name", value: show.title.slice(0, 40) });
     if (has) {
       fields.push({ id: "first", label: "First season", value: String(first) });
-      fields.push({ id: "last", label: "Last season", value: String(last) });
+      fields.push({ id: "last", label: "Last season (a number, or latest)", value: last == null ? "latest" : String(last), placeholder: "latest" });
     }
     const pick = (v) => {
       if (!has) return { range: null, picked: eps };
-      const a = parseInt(v.first, 10), b = parseInt(v.last, 10);
-      if (!Number.isInteger(a) || !Number.isInteger(b) || a > b) throw new Error("Enter the first and last season as numbers, the first no later than the last.");
+      const latest = /^\s*(latest|last|newest)?\s*$/i.test(v.last || "");
+      const a = parseInt(v.first, 10), b = latest ? null : parseInt(v.last, 10);
+      if (!Number.isInteger(a) || (!latest && (!Number.isInteger(b) || a > b))) {
+        throw new Error("Enter the first season as a number, and the last as a number no earlier than it, or latest.");
+      }
       const picked = inSeasons(eps, a, b);
-      if (!picked.length) throw new Error(`There are no episodes in season${a === b ? ` ${a}` : `s ${a}-${b}`}.`);
+      if (!picked.length) throw new Error(`There are no episodes in season${a === b ? ` ${a}` : latest ? `s ${a} on` : `s ${a}-${b}`}.`);
       return { range: [a, b], picked };
     };
     const text = `${show.title}: ${plural(eps.length, "episode")}` +
       (has ? ` in ${plural(seasons.length, "season")} (${seasons[0]}-${seasons[seasons.length - 1]}${seasons[0] === 0 ? "; season 0 is usually specials" : ""}).` : ".") +
-      (d ? " Choose which seasons the channel plays. Its schedule starts again after the episode on now." : " Choose which seasons the channel plays, and its name.");
+      (d ? " Choose which seasons the channel plays. Its schedule starts again after the episode on now." : " Choose which seasons the channel plays, and its name.") +
+      (has ? " Last season latest takes in new seasons as they turn up." : "");
     const make = (order) => async (v) => {
       let r;
       try { r = pick(v); } catch (e) { Dialog.message(e.message, true); return false; }
@@ -565,27 +576,16 @@
           act: patch({ order: d.order === "shuffle" ? "order" : "shuffle" }, d.order === "shuffle" ? `${d.name}: in order, after this episode` : `${d.name}: shuffled, after this episode`),
         },
         C.edit && { label: "Change Seasons", act: needSrc(() => seasonsDialog(src, d.show, d)) },
-        C.edit && d.seasons && {
+        C.edit && {
           label: "Look for New Episodes",
           act: needSrc(async () => {
             Dialog.message("Getting the episode list...");
             let eps;
-            try { eps = inSeasons(await showEpisodes(src, d.show), d.seasons[0], d.seasons[1]); } catch (e) { Dialog.message(e.message, true); return false; }
-            const have = new Set(d.eps.map((e) => e.id));
-            const fresh = eps.filter((e) => !have.has(e.id)).length, gone = d.eps.length - (eps.length - fresh);
-            if (!fresh && !gone) { Dialog.message(`No new episodes: still ${plural(d.eps.length, "episode")}.`, true); return false; }
+            try { eps = channelEps(d, await showEpisodes(src, d.show)); } catch (e) { Dialog.message(e.message, true); return false; }
             if (!eps.length) { Dialog.message("None of the channel's episodes are on the server any more.", true); return false; }
+            const { fresh, gone } = diffEps(d, eps);
+            if (!fresh && !gone) { Dialog.message(`No new episodes: still ${plural(d.eps.length, "episode")}.`, true); return false; }
             return patch({ eps: eps.map(epOut) }, `${d.name}: ${plural(fresh, "new episode")}${gone ? `, ${gone} gone` : ""}`)();
-          }),
-        },
-        C.edit && !d.seasons && {
-          label: "Look for New Episodes",
-          act: needSrc(async () => {
-            Dialog.message("Getting the episode list...");
-            let eps;
-            try { eps = await showEpisodes(src, d.show); } catch (e) { Dialog.message(e.message, true); return false; }
-            if (!eps.length) { Dialog.message("None of the show's episodes are on the server any more.", true); return false; }
-            return patch({ eps: eps.map(epOut) }, `${d.name}: ${plural(eps.length, "episode")}`)();
           }),
         },
         C.edit && {
@@ -618,6 +618,59 @@
       ],
     });
   }
+
+  /** How a channel's episodes differ from the show's list now. */
+  function diffEps(d, eps) {
+    const have = new Set(d.eps.map((e) => e.id)), now = new Set(eps.map((e) => e.id));
+    return {
+      fresh: eps.filter((e) => !have.has(e.id)).length,
+      gone: d.eps.filter((e) => !now.has(e.id)).length,
+      same: eps.length === d.eps.length && eps.every((e, i) => e.id === d.eps[i].id && Math.abs(e.dur - d.eps[i].dur) < 0.001),
+    };
+  }
+
+  /**
+   * New episodes, without anyone asking: an admin's TV looks at each
+   * channel's show every few hours (the server doesn't talk to Plex or
+   * Jellyfin itself), and puts new ones on the channel; with the last season
+   * "latest", that takes in new seasons too. Episodes gone from the server
+   * come off, unless most of them have (more likely the server having a bad
+   * moment than the show being deleted: that's left for an admin).
+   */
+  const CHECK_EVERY = 6 * 3600e3, CHECKED_KEY = "iptv.channelsChecked";
+  let checking = false;
+  async function checkNew() {
+    if (checking || !C.edit || !C.defs.length || document.hidden) return;
+    checking = true;
+    let checked = {};
+    try { checked = JSON.parse(localStorage.getItem(CHECKED_KEY) || "{}") || {}; } catch { /* */ }
+    let changed = false;
+    try {
+      for (const d of C.defs.slice()) {
+        if (Date.now() - (checked[d.id] || 0) < CHECK_EVERY) continue;
+        const src = sourceFor(d);
+        if (!src) continue;
+        let eps;
+        try { eps = channelEps(d, await showEpisodes(src, d.show)); } catch { continue; } // try again next time
+        checked[d.id] = Date.now();
+        const { fresh, gone, same } = diffEps(d, eps);
+        if (same || !eps.length || gone > d.eps.length / 2) continue;
+        try {
+          await api("PATCH", `/api/channels/${d.id}`, { eps: eps.map(epOut) });
+          changed = true;
+          console.info(`${d.name}: ${fresh} new episode(s), ${gone} gone`);
+        } catch { delete checked[d.id]; }
+      }
+    } finally {
+      const ids = new Set(C.defs.map((d) => d.id));
+      for (const k of Object.keys(checked)) if (!ids.has(k)) delete checked[k];
+      try { localStorage.setItem(CHECKED_KEY, JSON.stringify(checked)); } catch { /* */ }
+      checking = false;
+    }
+    if (changed) { await refresh(true); rerender(); }
+  }
+  setTimeout(checkNew, 45e3);
+  setInterval(checkNew, 15 * 60e3);
 
   // ------------------------------------------------------------------- api
   window.Channels = {
