@@ -29,7 +29,8 @@
    * The screen around the page: the name in the header (lime), what the
    * remote's Back key does, and a count at the right of the title bar. The
    * account and Users pages belong to Settings > Account, so they say
-   * "Settings" and Back goes back there.
+   * "Settings"; Back goes back there from the account page, and to the TV
+   * (as Go to TV) from the Users page's lists.
    */
   const scr = { name: "TV Listings", back: null, backLabel: "", pos: "" };
   /** Back to wherever the page was opened from (the guide's Settings), or the guide. */
@@ -380,7 +381,8 @@
 
     /** The lists: people and groups, with the buttons to add them. */
     function showLists() {
-      inSettings();
+      // Back is Go to TV, not back a page: that may be a group being set up on the TV
+      Object.assign(scr, { name: "Settings", back: () => go("/"), backLabel: "Go to TV" });
       scr.pos = `${list.length} ${list.length === 1 ? "person" : "people"}`;
       page("Users",
         p("Everyone who can sign in. Each person's settings are saved on the server; put people in a group to set up their TVs for them.", "note"),
@@ -639,8 +641,8 @@
    * guide's screens: ▲▼ to the row above or below (the button most nearly
    * in line), ◀▶ along a row. In a text field ◀▶ move the cursor instead.
    * Back (Esc, a remote's Back key, or Backspace outside a text field) does
-   * what the key hints say: Cancel on the Users page's screens, otherwise
-   * back to Settings.
+   * what the key hints say: Cancel on the Users page's screens, Go to TV on
+   * its lists, otherwise back to Settings.
    */
   const BACK = new Set(["Escape", "GoBack", "BrowserBack", "XF86Back"]);
   const BACK_CODES = new Set([461, 10009]); // webOS, Tizen
