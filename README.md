@@ -91,7 +91,8 @@ TorBox, AllDebrid, Premiumize...), the way Stremio does, through
 
 Catalogs and their genres show up as libraries, with Search. A title is
 looked up in every stream addon, the debrid service says which files it
-already has, and the best one the browser can play starts. Every stream
+already has, and of the ones the browser can play, the one with the most
+seeders starts (even over a slightly better picture). Every stream
 comes through this server (AIOStreams' own proxy), so the debrid service only
 ever sees the server's address, however many people watch at once. Files are
 played as they are, never converted: MP4 and MKV with H.264 play everywhere,

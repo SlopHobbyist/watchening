@@ -10,9 +10,9 @@
  *     isn't offered); some only list once a genre is picked (genreRequired)
  *   - Continue Watching asks for everything at once (per library it's empty)
  *   - a title's versions are the streams the addons found, files your debrid
- *     service already has first. Nothing is converted, so we pick the first
- *     one this browser can play (by its container and codecs); Choose Version
- *     lists them all. Each comes through AIOStreams' proxy on this server
+ *     service already has first. Nothing is converted, so we play one this
+ *     browser can play (by its container and codecs), the one with the most
+ *     seeders of those (see `better`); Choose Version lists them all. Each comes through AIOStreams' proxy on this server
  *     (/api/v1/proxy/), so the debrid service only sees the server's
  *     address; a version that doesn't is never played.
  *   - only subtitle files from addons; ones inside the video can't be fetched
@@ -556,11 +556,30 @@
     if (!/^\/api\/v1\/proxy\//.test(u.pathname)) return null;
     return new URL(u.pathname + u.search, src.server.uri).href;
   }
-  /** "1080p · BluRay · HEVC · DD+ 5.1 · 12.3 GB · Cached" */
+  /** The seeders an addon counted for a version's torrent; null if it didn't say. */
+  function seeders(ms) {
+    const n = (ms.aiostreams || {}).seeders;
+    return typeof n === "number" && n >= 0 ? n : null;
+  }
+  /** Ready to play now: the debrid service already has it (or it isn't a torrent). */
+  const ready = (ms) => ((ms.aiostreams || {}).cached === false ? 0 : 1);
+  /**
+   * Which of two versions to play when none was picked (a sort function):
+   * the one this browser plays (sure before maybe), then one the debrid
+   * service already has, then the most seeders, even over a slightly better
+   * picture: the release most people chose is the likeliest to be complete,
+   * in sync and correctly labelled. Unknown counts go last; AIOStreams'
+   * order breaks ties.
+   */
+  const better = (x, y) => fit(y) - fit(x) || ready(y) - ready(x) || (seeders(y) ?? -1) - (seeders(x) ?? -1);
+
+  /** "1080p · BluRay · HEVC · DD+ 5.1 · 12.3 GB · 150 seeders" */
   function versionTag(ms) {
     const a = ms.aiostreams || {};
     const gb = !a.size ? "" : a.size >= 1e9 ? `${(a.size / 1e9).toFixed(a.size >= 1e10 ? 0 : 1)} GB` : `${Math.max(1, Math.round(a.size / 1e6))} MB`;
-    return [a.resolution, a.quality, a.encode, (a.audioTags || []).slice(0, 2).join(" "), a.audioChannels && a.audioChannels[0], gb]
+    const n = seeders(ms);
+    return [a.resolution, a.quality, a.encode, (a.audioTags || []).slice(0, 2).join(" "), a.audioChannels && a.audioChannels[0], gb,
+      n != null && `${n} seeder${n === 1 ? "" : "s"}`]
       .filter((x) => x && x !== "Unknown").join(" · ");
   }
 
@@ -612,9 +631,10 @@
     if (!ours.length) throw new Error("AIOStreams isn't sending its streams through this server, so they won't be played (your debrid service would see this TV's address). Check its proxy settings");
     let ms = opts.version && ours.find((x) => x.Id === opts.version);
     if (!ms) {
-      // AIOStreams' order, but the first this browser can surely play, then
-      // one it might, then (so there's still an error to see) the first
-      ms = ours.find((x) => fit(x) === 2) || ours.find((x) => fit(x) === 1) || ours[0];
+      // one this browser can surely play, then one it might, then (so there's
+      // still an error to see) AIOStreams' first
+      ms = ours.slice().sort(better)[0];
+      if (!fit(ms)) ms = ours[0];
     }
     const dur = (ms.RunTimeTicks || m.RunTimeTicks || 0) / TICKS || it.dur;
     const start = opts.at != null ? opts.at : opts.fromStart ? 0 : ((m.UserData || {}).PlaybackPositionTicks || 0) / TICKS || it.offset || 0;
