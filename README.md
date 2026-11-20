@@ -73,6 +73,15 @@ There's a voice search built into the keyboard. Runs [FUTO's voice input models]
 Putting it on the internet behind a reverse proxy: see
 [docs/DEPLOYING.md](docs/DEPLOYING.md).
 
+### Android TV app
+
+[android/](android/README.md) has a small app that opens your server full
+screen on an Android TV box (Android 8.0 or newer). It installs the
+[Control Panel for YouTube](https://github.com/insin/control-panel-for-youtube)
+extension for YouTube channels, and adds **Reload App (Clear Cache)** to
+`Settings > Options`. Build it with `android/build.sh` (needs only Docker),
+then sideload the APK from `android/dist/`.
+
 ### Stremio addons and debrid
 
 On Demand can also play from Stremio addons with a debrid service (Real-Debrid,
@@ -192,6 +201,7 @@ It's built on these projects, each under its own license:
 | [FUTO voice input models](https://keyboard.futo.tech/voice-input-models) ([whisper-acft](https://github.com/futo-org/whisper-acft)) | Voice search models, downloaded on first start | Apache-2.0 (models), MIT (training code) |
 | [OpenAI Whisper](https://github.com/openai/whisper) | The model FUTO's are fine-tuned from | MIT |
 | [AIOStreams](https://github.com/Viren070/AIOStreams) | Stremio addons, debrid services and their stream proxy, for On Demand | AGPL-3.0 |
+| [GeckoView](https://mozilla.github.io/geckoview/) | The Android TV app's web engine | MPL-2.0 |
 
 The Comcast and TV Guide logos and the channel logos in `webui/assets/` are
 trademarks of their owners. They're used here only to identify the channels,

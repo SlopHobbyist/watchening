@@ -211,6 +211,7 @@
         info: { title: "Remote Control Keys", desc: "Keyboard shortcuts for the guide, the menus and the player." },
         act: helpDialog,
       },
+      ...(U.app ? appRows() : []),
       {
         text: Sync.editing ? "Erase This Group's Settings" : "Erase All Settings & Playlists",
         info: {
@@ -223,6 +224,23 @@
           await Sync.flush();
           location.reload();
         }),
+      },
+    ];
+  }
+
+  /** Only in the Android TV app (U.app): it does these itself. */
+  function appRows() {
+    const ask = (action) => async () => { await Sync.flush(); U.appAction(action); };
+    return [
+      {
+        text: "Reload App (Clear Cache)",
+        info: { title: "Reload App", desc: "Clears this TV app's cache and loads the page again, fresh from the server. Try it if something looks stuck or out of date. You stay signed in, and your settings stay." },
+        act: ask("reload"),
+      },
+      {
+        text: "Change Server Address",
+        info: { title: "Change Server Address", desc: "The address of the Watchening server this TV app opens." },
+        act: ask("server"),
       },
     ];
   }

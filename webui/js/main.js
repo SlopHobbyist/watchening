@@ -1460,7 +1460,7 @@
    */
   const tvParam = new URLSearchParams(location.search).get("tv");
   const TV = tvParam != null ? tvParam !== "0"
-    : /\b(Android TV|GoogleTV|Google TV|AFT\w*|SHIELD|BRAVIA|CrKey|SMART-TV|SmartTV|Tizen|Web0S|webOS)\b/i.test(navigator.userAgent) ||
+    : U.app || /\b(Android TV|GoogleTV|Google TV|AFT\w*|SHIELD|BRAVIA|CrKey|SMART-TV|SmartTV|Tizen|Web0S|webOS)\b/i.test(navigator.userAgent) ||
       matchMedia("(any-pointer: none)").matches;
   let guarded = false, lastBackKey = 0;
   function guardBack() {

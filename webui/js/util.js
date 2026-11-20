@@ -31,6 +31,10 @@
   };
   /** A Back button (Esc or a remote's Back), not the Backspace key. */
   U.isBack = (e) => e.key !== "Backspace" && U.nav(e) === "back";
+  /** Running in the Android TV app (android/ in the repo): its user agent ends
+   *  in "WatcheningTV/<version>", and it does U.appAction("reload") etc. */
+  U.app = /\bWatcheningTV\//.test(navigator.userAgent);
+  U.appAction = (action) => { location.href = "watchening-app:" + action; };
   U.uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   U.esc = (s) =>
     String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);

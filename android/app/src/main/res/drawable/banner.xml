@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV launcher banner (320x180 at xhdpi). Lettering made by a script: stroke paths, no font. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="160dp" android:height="90dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="0" android:endY="180"
+                android:startColor="#FF2A5A8A" android:endColor="#FF143D69" />
+        </aapt:attr>
+    </path>
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M15.0,66.0 L20.0,94.0 L25.0,76.0 L30.0,94.0 L35.0,66.0 M45.0,94.0 L55.0,66.0 L65.0,94.0 M49.0,83.0 L61.0,83.0 M75.0,66.0 L95.0,66.0 M85.0,66.0 L85.0,94.0 M125.0,71.0 L121.0,66.0 L109.0,66.0 L105.0,71.0 L105.0,89.0 L109.0,94.0 L121.0,94.0 L125.0,89.0 M135.0,66.0 L135.0,94.0 M155.0,66.0 L155.0,94.0 M135.0,80.0 L155.0,80.0 M185.0,66.0 L165.0,66.0 L165.0,94.0 L185.0,94.0 M165.0,80.0 L179.0,80.0 M195.0,94.0 L195.0,66.0 L215.0,94.0 L215.0,66.0 M229.0,66.0 L241.0,66.0 M235.0,66.0 L235.0,94.0 M229.0,94.0 L241.0,94.0 M255.0,94.0 L255.0,66.0 L275.0,94.0 L275.0,66.0 M305.0,71.0 L301.0,66.0 L289.0,66.0 L285.0,71.0 L285.0,89.0 L289.0,94.0 L301.0,94.0 L305.0,89.0 L305.0,82.0 L297.0,82.0" />
+    <path android:strokeColor="#FFFFD800" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M15.0,110.0 L305.0,110.0" />
+</vector>

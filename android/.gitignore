@@ -1,0 +1,9 @@
+.gradle/
+.gradle-home/
+build/
+dist/
+local.properties
+# release signing (see README.md)
+keystore.properties
+*.jks
+*.keystore
