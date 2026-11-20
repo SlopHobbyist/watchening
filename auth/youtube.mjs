@@ -37,13 +37,17 @@ export class YouTubeError extends Error {
   constructor(message) { super(message); this.status = 400; }
 }
 
-async function api(endpoint, body) {
+/** `visitor`: YouTube's visitorData from an earlier answer (a list's later
+ *  pages are only given to the visitor who was given the first). */
+async function api(endpoint, body, visitor) {
   let res;
+  const client = visitor ? Object.assign({}, CLIENT, { visitorData: visitor }) : CLIENT;
   try {
     res = await fetch(`${YT}/youtubei/v1/${endpoint}?prettyPrint=false`, {
       method: "POST",
-      headers: { "content-type": "application/json", "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
-      body: JSON.stringify(Object.assign({ context: { client: CLIENT } }, body)),
+      headers: Object.assign({ "content-type": "application/json", "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
+        visitor ? { "x-goog-visitor-id": visitor } : {}),
+      body: JSON.stringify(Object.assign({ context: { client } }, body)),
       signal: AbortSignal.timeout(20000),
     });
   } catch (e) {
@@ -159,11 +163,29 @@ function agoDate(s, now) {
   return m ? new Date(now - +m[1] * UNITS[m[2].toLowerCase()] * 1000).toISOString().slice(0, 10) : "";
 }
 
-/** The videos in one page of a list. */
-function pageItems(j, now) {
-  const out = [];
-  let token = null;
+/** The text of an old-style renderer's title or line ({ simpleText } or { runs }). */
+const plain = (t) => (!t ? "" : typeof t.simpleText === "string" ? t.simpleText : Array.isArray(t.runs) ? t.runs.map((r) => r.text || "").join("") : "");
+
+/** The videos in one page of a list. `kinds`: the names of the things seen on it (for when it's none). */
+function pageItems(j, now, kinds) {
+  const out = [], tokens = [];
   walk(j, (o) => {
+    if (kinds) for (const k in o) if (/(Renderer|ViewModel)$/.test(k)) kinds.add(k);
+    // the older ways YouTube has drawn lists (it still tries them on some visitors)
+    const old = o.playlistVideoRenderer || o.videoRenderer || o.gridVideoRenderer;
+    if (old) {
+      if (VIDEO_ID.test(old.videoId || "")) {
+        const lines = [plain(old.publishedTimeText), ...(old.videoInfo && old.videoInfo.runs ? old.videoInfo.runs.map((r) => r.text || "") : [])];
+        const age = lines.find((x) => /\bago\b/i.test(x)) || "";
+        let dur = old.lengthSeconds != null ? +old.lengthSeconds : seconds(plain(old.lengthText));
+        if (!(dur > 0)) dur = null;
+        out.push({
+          id: old.videoId, title: plain(old.title), dur, aired: agoDate(age, now), lv: /^Streamed\b/i.test(age),
+          members: JSON.stringify(old.badges || "").includes("Members only") || old.isPlayable === false,
+        });
+      }
+      return false;
+    }
     const l = o.lockupViewModel;
     if (l) {
       if (l.contentType === "LOCKUP_CONTENT_TYPE_VIDEO" && VIDEO_ID.test(l.contentId || "")) {
@@ -182,9 +204,11 @@ function pageItems(j, now) {
       }
       return false;
     }
-    if (o.continuationCommand && typeof o.continuationCommand.token === "string") token = o.continuationCommand.token;
+    if (o.continuationCommand && typeof o.continuationCommand.token === "string") tokens.push(o.continuationCommand.token);
   });
-  return { items: out, token };
+  // (in the page's order: the list's own "more" first, then others, such as
+  // a shelf of recommended playlists under a playlist)
+  return { items: out, tokens };
 }
 
 /**
@@ -199,28 +223,47 @@ export async function videos(kind, id, progress) {
   const now = Date.now();
   let j = await api("browse", { browseId: "VL" + list });
   if (!j) throw new Error("YouTube couldn't find the list of videos");
-  const out = [], seen = new Set(), tokens = new Set();
-  let empty = 0;
-  for (;;) {
-    const { items, token } = pageItems(j, now);
+  const visitor = j.responseContext && j.responseContext.visitorData;
+  const out = [], seen = new Set(), used = new Set(), kinds = new Set();
+  let unplayable = 0;
+  /** A page's videos onto the list: how many were new. */
+  const take = (items) => {
     let added = 0;
     for (const v of items) {
       if (seen.has(v.id)) continue;
       seen.add(v.id);
       added++;
       if (v.dur != null && v.dur > 0 && !v.members) out.push({ id: v.id, title: v.title, dur: v.dur, aired: v.aired, lv: v.lv });
+      else unplayable++;
     }
+    return added;
+  };
+  let page = pageItems(j, now, kinds);
+  take(page.items);
+  for (;;) {
     if (progress) progress(seen.size);
-    // (a page with nothing new twice running: the list has stopped going anywhere)
-    empty = added ? 0 : empty + 1;
-    if (!token || tokens.has(token) || empty >= 2 || seen.size >= MAX_VIDEOS) break;
-    tokens.add(token);
-    j = await api("browse", { continuation: token });
-    if (!j) break;
+    if (seen.size >= MAX_VIDEOS) break;
+    // the next page: the first of the page's "more" links that has more videos
+    let next = null;
+    for (const token of page.tokens.filter((t) => !used.has(t)).slice(0, 3)) {
+      used.add(token);
+      const got = await api("browse", { continuation: token }, visitor);
+      if (!got) continue;
+      const p = pageItems(got, now, null);
+      if (take(p.items)) { j = got; next = p; break; }
+    }
+    if (!next) break;
+    page = next;
   }
   if (!seen.size) {
     const why = alertOf(j);
-    if (why) throw new Error(why);
+    if (why) throw new YouTubeError(why);
+    // (YouTube drew the page some new way: say what was on it, to fix this file by)
+    console.log(new Date().toISOString(), `YouTube: no videos found in ${list}; the page had: ${[...kinds].slice(0, 40).join(", ")}`);
+    throw new Error("YouTube's page for that list had no videos this server could read (YouTube may have changed its pages; the accounts log says more)");
+  }
+  if (!out.length) {
+    throw new YouTubeError(`None of the ${unplayable} video${unplayable === 1 ? "" : "s"} there can be played here (live now, upcoming, members-only, or private)`);
   }
   return out;
 }

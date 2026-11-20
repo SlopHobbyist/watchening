@@ -1134,10 +1134,28 @@
     // a subtitle file from the server has its own row, not a loaded file's
     const fromServer = (x) => x.t === Player.EXT && vodSubs.some((s) => s.url && s.label === Player.extName);
     const tracks = Player.ccTracks().filter((x) => !fromServer(x));
+    const yt = !!Player.yt;
     const rows = [{
-      label: "Off", check: !Player.cc && !(v && v.burn), desc: "No subtitles.",
-      act: () => (v && v.burn ? OnDemand.chooseSub(null) : Player.setTrack(null)),
+      label: "Off", check: !Player.cc && !(v && v.burn) && !(yt && Player.ytCC), desc: "No subtitles.",
+      act: () => { if (v && v.burn) OnDemand.chooseSub(null); else { Player.setTrack(null); if (yt) Player.ytSetCC(null); } },
     }];
+    // YouTube's own captions, drawn by its player (the languages, when it says)
+    if (yt) {
+      const langs = Player.ytTracks();
+      if (!langs.length) {
+        rows.push({
+          label: "YouTube's Captions", check: Player.ytCC,
+          desc: "Captions from YouTube, drawn by its player: the video's own, or made by machine. Not every video has them.",
+          act: () => Player.ytSetCC(""),
+        });
+      }
+      for (const x of langs) {
+        rows.push({
+          label: x.label, check: Player.ytCC && (Player.ytLang ? Player.ytLang === x.lang : x.lang.split("-")[0] === (navigator.language || "en").split("-")[0]),
+          desc: "Captions from YouTube, drawn by its player.", act: () => Player.ytSetCC(x.lang),
+        });
+      }
+    }
     for (const s of vodSubs) {
       rows.push({
         label: s.label, check: OnDemand.subOn(s),
@@ -1152,18 +1170,19 @@
         : (t.kind === "captions" ? "Closed captions" : "Subtitles") + (t.language ? ` (${t.language})` : "") + " sent by this channel.";
       rows.push({ label: x.label, check: Player.cc === t, desc, act: () => Player.setTrack(t) });
     }
-    if (!tracks.length && !vodSubs.length) {
+    if (!tracks.length && !vodSubs.length && !yt) {
       rows.push({ label: "None in this stream", disabled: true });
     }
     rows.push({ sep: true });
-    rows.push({
+    // (YouTube's own captions have neither: only a file loaded over it)
+    if (!yt || Player.extCues) rows.push({
       label: "Offset", value: fmtOffset(Player.ccOffset),
       desc: "◀ shows subtitles sooner, ▶ later, by 0.1s (hold Shift for 1s). Remembered for this channel.",
       step: (d, big) => setOffset(Player.ccOffset + d * (big ? 1 : 0.1)),
       act: () => {},
     });
-    rows.push({ label: "Reset Offset", desc: "Put the subtitles back in step with the stream (offset 0.0s).", act: () => setOffset(0) });
-    rows.push({
+    if (!yt || Player.extCues) rows.push({ label: "Reset Offset", desc: "Put the subtitles back in step with the stream (offset 0.0s).", act: () => setOffset(0) });
+    if (!yt || Player.extCues) rows.push({
       label: "Size", value: CC_SIZES[Player.ccSize()],
       desc: "Size of the subtitle text. The same for every channel.",
       step: (d) => App.setPrefs({ ccSize: U.clamp(Player.ccSize() + d, 0, 2) }),

@@ -258,6 +258,12 @@
    * or key press; YouTube's player can then be unmuted without loading it
    * again. Its own controls are hidden (ours are drawn over it), and mouse
    * clicks don't reach it (style.css), so it never takes the keyboard.
+   * (YouTube still shows the video's title and its logo for a few seconds
+   * whenever it starts playing after loading: there's no turning that off.)
+   *
+   * YouTube may play an ad first (the TVs aren't signed in to YouTube). Its
+   * player can't say so: the video just doesn't start. So once it's ready,
+   * starting may take a few minutes before it counts as failed.
    */
   let ytApi = null;
   function youtubeApi() {
@@ -292,6 +298,7 @@
     if (my !== P.token) return;
     const holder = document.createElement("div");
     holder.id = "yt-" + my;
+    let ready = false;
     tv.insertBefore(holder, ccEl);
     start = Math.max(0, start || 0);
     const yp = new Y.Player(holder, {
@@ -303,6 +310,7 @@
       events: {
         onReady: () => {
           if (P.yt !== yp) return;
+          ready = true;
           try {
             if (video.muted) yp.mute(); else yp.unMute();
             if (!P.held) yp.playVideo();
@@ -336,7 +344,15 @@
     f.title = ch.name;
     P.frame = f;
     layoutVideo();
-    setTimeout(() => { if (P.yt === yp && my === P.token && P.loading) fail("YouTube's player didn't start"); }, 30000);
+    // (not answering at all after 30s: it's failed; ready, but no video yet:
+    // perhaps a few ads in a row, so a few minutes)
+    const t0 = Date.now();
+    const check = () => {
+      if (P.yt !== yp || my !== P.token || !P.loading) return;
+      if (!ready || Date.now() - t0 > 180000) fail("YouTube's player didn't start");
+      else setTimeout(check, 15000);
+    };
+    setTimeout(check, 30000);
   }
 
   function teardown() {
@@ -845,15 +861,7 @@
   P.toggleCC = () => {
     // YouTube draws its own (when the video has them)
     if (P.yt) {
-      P.ytCC = !P.ytCC;
-      P.ccWanted = P.ytCC;
-      try {
-        if (P.ytCC) {
-          P.yt.loadModule("captions");
-          const lang = (navigator.language || "en").split("-")[0];
-          P.yt.setOption("captions", "track", { languageCode: lang });
-        } else P.yt.unloadModule("captions");
-      } catch { /* */ }
+      P.ytSetCC(P.ytCC ? null : P.ytLang || "");
       return P.ytCC ? "YouTube's captions (if the video has them)" : "Off";
     }
     if (P.cc) { P.setTrack(null); return "Off"; }
@@ -862,6 +870,27 @@
     const pick = list.find((x) => x.t === P.lastCC) || list[0];
     P.setTrack(pick.t);
     return pick.label;
+  };
+  /** YouTube's captions: the languages it lists for the video ({ lang, label };
+   *  often none, when it only has captions made by machine). */
+  P.ytTracks = () => {
+    let list = [];
+    try { list = (P.yt && P.yt.getOption("captions", "tracklist")) || []; } catch { /* */ }
+    return list.filter((t) => t && t.languageCode).map((t) => ({ lang: t.languageCode, label: t.displayName || t.languageName || t.languageCode }));
+  };
+  /** YouTube's captions on in language `lang` ("": this TV's), or off (null). */
+  P.ytSetCC = (lang) => {
+    if (!P.yt) return;
+    P.ytCC = lang != null;
+    P.ytLang = lang || "";
+    P.ccWanted = P.ytCC;
+    try {
+      if (P.ytCC) {
+        P.yt.loadModule("captions");
+        P.yt.setOption("captions", "track", { languageCode: lang || (navigator.language || "en").split("-")[0] });
+      } else P.yt.unloadModule("captions");
+    } catch { /* not ready */ }
+    emit("cc");
   };
   P.setOffset = (sec) => {
     P.ccOffset = Math.round(U.clamp(sec, -60, 60) * 10) / 10;

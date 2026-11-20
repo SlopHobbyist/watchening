@@ -158,7 +158,9 @@ Watchening's server reads the lists the way youtube.com's own pages do, and
 looks at them again every six hours for new uploads (**Look for New Videos**
 to look now). A video whose owner doesn't allow it to play outside YouTube is
 skipped for everyone the first time a TV runs into it, and left off the
-channel after that.
+channel after that. The schedule leaves three seconds before each video for
+the TVs to start YouTube's player, so every video plays from its very start
+to its very end.
 
 [SponsorBlock](https://sponsor.ajay.app)'s crowd-sourced skips are added over
 the first few minutes after a channel is made (and for each new video):

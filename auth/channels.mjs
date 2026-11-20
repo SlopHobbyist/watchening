@@ -168,10 +168,16 @@ function epAt(ch, pos) {
  * (`gaps`, in order: the intro with Skip Intros on, and a YouTube video's
  * sponsors and the like, `cut`), and where it stops (the end credits with
  * Skip Credits on, else the end; a gap that runs to the end ends it there).
+ *
+ * A YouTube video also has a few seconds before it (`lead`, yt.lead), while
+ * the TVs start YouTube's player for it, so it plays from the very start
+ * (and the one before it can play to its very end).
  * webui/js/channels.js does the same sums.
  */
 function cuts(ch, i) {
   const e = ch.eps[i], s = ch.skip || {};
+  const lead = (ch.yt && ch.yt.lead) || 0;
+  const brk = (ch.yt && ch.yt.brk) || 0; // (a channel from before lead-ins, only as init() moves it on)
   let end = s.credits && e.credits ? e.credits : e.dur;
   const spans = (e.cut || []).slice();
   if (s.intro && e.intro) spans.push(e.intro);
@@ -179,16 +185,17 @@ function cuts(ch, i) {
   for (const [a, b] of merge(spans)) {
     if (a >= end) break;
     if (b >= end - 1) { end = a; break; }
-    gaps.push([a, b]);
+    if (!brk) gaps.push([a, b]);
+    else if (b - a > brk + 2) gaps.push([a, b - brk]);
   }
   // (with next to nothing left, play it all)
-  if (end - gaps.reduce((t, g) => t + g[1] - g[0], 0) < 5) return { gaps: [], end: e.dur };
-  return { gaps, end };
+  if (end - gaps.reduce((t, g) => t + g[1] - g[0], 0) < 5) return { gaps: [], end: e.dur, lead };
+  return { gaps, end, lead };
 }
 /** Episode i's length on the channel (ms). */
 function durMs(ch, i) {
   const c = cuts(ch, i);
-  return Math.round((c.end - c.gaps.reduce((t, g) => t + g[1] - g[0], 0)) * 1000);
+  return Math.round((c.lead + c.end - c.gaps.reduce((t, g) => t + g[1] - g[0], 0)) * 1000);
 }
 const passMs = (ch) => ch.eps.reduce((s, e, i) => s + durMs(ch, i), 0);
 
@@ -528,10 +535,11 @@ const YT_EVERY = 6 * 3600e3;     // read each list again this often
 const SB_FRESH = 14 * 86400e3;   // SponsorBlock is asked again about videos this new...
 const SB_AGAIN = 12 * 3600e3;    // ...this often
 const MIN_YT = 5;                // the shortest video scheduled (s)
+const LEAD = 3;                  // before each video, while the TVs start YouTube's player (s): see cuts
 
 const ytInfo = (ch) => {
   const y = ch.yt;
-  return { kind: y.kind, id: y.id, logo: y.logo, shorts: y.shorts, live: y.live, rev: y.rev, at: y.at, vids: y.vids.length, bad: y.bad.length };
+  return { kind: y.kind, id: y.id, logo: y.logo, shorts: y.shorts, live: y.live, rev: y.rev, at: y.at, vids: y.vids.length, bad: y.bad.length, lead: y.lead || 0 };
 };
 function cleanYtOpts(v, was) {
   if (!v || typeof v !== "object") throw new ChannelError(400, "YouTube options are { shorts, live, rev }");
@@ -569,7 +577,7 @@ async function findShorts(vids, progress) {
       if (progress && (done % 10 === 0 || done === todo.length)) progress(`Looking for shorts: ${done} of ${todo.length}...`);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(6, todo.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(16, todo.length) }, worker));
   for (const v of vids) if (v.sh == null && !YT.mightBeShort(v.dur)) v.sh = false;
 }
 
@@ -634,7 +642,7 @@ export function addYoutube(b, by) {
     if (!vids.length) throw new ChannelError(400, "YouTube didn't list any videos there that can be played");
     const now = Date.now();
     const name = cleanName(named || r.title.slice(0, 40));
-    const yt = Object.assign({ kind: r.kind, id: r.id, logo: (r.logo || "").replace(/=s\d+-/, "=s88-"), at: now, vids, bad: [] }, opts);
+    const yt = Object.assign({ kind: r.kind, id: r.id, logo: (r.logo || "").replace(/=s\d+-/, "=s88-"), at: now, vids, bad: [], lead: LEAD }, opts);
     const ch = {
       id: crypto.randomUUID(), name,
       src: { type: "youtube", server: "youtube", name: "YouTube" },
@@ -1043,6 +1051,19 @@ export function init() {
   load();
   // YouTube: SponsorBlock where it was left off, and lists read again as they come due
   for (const ch of doc.channels) if (ch.yt) queueSB(ch.id);
+  // channels made before videos had a lead-in (or with another): the video
+  // on now plays out as it was, then the run carries on with them
+  const now = Date.now();
+  let moved = false;
+  for (const ch of doc.channels) {
+    if (!ch.yt || (ch.yt.lead === LEAD && !("brk" in ch.yt))) continue;
+    const before = Object.assign({}, ch);
+    ch.yt = Object.assign({}, ch.yt, { lead: LEAD });
+    delete ch.yt.brk;
+    restartRun(ch, before, now);
+    moved = true;
+  }
+  if (moved) changed();
   setTimeout(ytTick, 60e3);
   setInterval(ytTick, 10 * 60e3);
 }

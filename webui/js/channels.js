@@ -145,9 +145,15 @@
     return out;
   }
   const gapsLen = (gaps) => gaps.reduce((t, g) => t + g[1] - g[0], 0);
-  /** What the channel plays of an episode: { gaps (left out, in order), end }. */
+  /**
+   * What the channel plays of an episode: { gaps (left out, in order), end,
+   * lead }. A YouTube video has a few seconds before it (`lead`, yt.lead),
+   * while the TV starts YouTube's player for it, so it plays from the very
+   * start (and the one before can play to its very end).
+   */
   function cutsOf(d, ep) {
     const s = d.skip || {};
+    const lead = (isYT(d) && d.yt && d.yt.lead) || 0;
     let end = s.credits && ep.credits ? ep.credits : ep.dur;
     const spans = (ep.cut || []).slice();
     if (s.intro && ep.intro) spans.push(ep.intro);
@@ -157,25 +163,27 @@
       if (b >= end - 1) { end = a; break; }
       gaps.push([a, b]);
     }
-    if (end - gapsLen(gaps) < 5) return { gaps: [], end: ep.dur };
-    return { gaps, end };
+    if (end - gapsLen(gaps) < 5) return { gaps: [], end: ep.dur, lead };
+    return { gaps, end, lead };
   }
   /** An episode's length on the channel (s). */
-  const chanDur = (d, ep) => { const c = cutsOf(d, ep); return c.end - gapsLen(c.gaps); };
-  /** The channel's seconds into an episode -> the video's. */
+  const chanDur = (d, ep) => { const c = cutsOf(d, ep); return c.lead + c.end - gapsLen(c.gaps); };
+  /** The channel's seconds into an episode -> the video's (in the lead-in: its start). */
   const toMedia = (d, ep, x) => {
-    let t = x;
-    for (const g of cutsOf(d, ep).gaps) { if (t >= g[0]) t += g[1] - g[0]; else break; }
+    const c = cutsOf(d, ep);
+    let t = Math.max(0, x - c.lead);
+    for (const g of c.gaps) { if (t >= g[0]) t += g[1] - g[0]; else break; }
     return t;
   };
   /** ...and back (inside a gap: where it starts). */
   const fromMedia = (d, ep, t) => {
+    const c = cutsOf(d, ep);
     let x = t;
-    for (const g of cutsOf(d, ep).gaps) {
+    for (const g of c.gaps) {
       if (t >= g[1]) x -= g[1] - g[0];
       else if (t > g[0]) x -= t - g[0];
     }
-    return Math.max(0, x);
+    return c.lead + Math.max(0, x);
   };
   /** How far into its episode entry `e` is at `now` (the channel's seconds). */
   const chanAt = (e, now) => (e.pause ? e.off : e.off + Math.max(0, now - e.start) / 1000);
@@ -215,6 +223,8 @@
   // ----------------------------------------------------------------- playing
   /** What's playing: { id, i, pos, start, end, off, pause, src, pl, subs, markers } */
   let playing = null, resolving = 0;
+  /** How long YouTube's player takes to start here (ms), learned as it goes. */
+  let ytLag = 2000;
 
   function release() {
     if (!playing) return;
@@ -244,7 +254,11 @@
       // YouTube's own player (player.js), from the right point
       release();
       playing = Object.assign({ id, src, pl: null, subs: [], subsDone: true, markers: null }, e);
-      return { yt: ep.id, start: toMedia(d, ep, chanAt(e, Date.now())) };
+      // (from as far in as it'll be by the time YouTube's player has started;
+      // in the lead-in, the start)
+      const x = Math.min(chanAt(e, Date.now() + ytLag), Math.max(0, chanDur(d, ep) - 5));
+      playing.mid = toMedia(d, ep, x) > 0;
+      return { yt: ep.id, start: toMedia(d, ep, x) };
     }
     const item = { id: ep.id, type: "episode", title: ep.title, show: d.show.title, season: ep.season, episode: ep.episode, dur: ep.dur };
     const pl = await p.play(src, item, { at: toMedia(d, ep, chanAt(e, Date.now())), burn: null });
@@ -278,7 +292,9 @@
     if (playing.pause && !e.pause && Date.now() - playing.start > 60e3) return false;
     Object.assign(playing, { pos: e.pos, start: e.start, end: e.end, off: e.off, pause: e.pause });
     const t = toMedia(d, d.eps[e.i], chanAt(e, Date.now()));
-    if (Math.abs(Player.time() - t) > 2) Player.jump(t);
+    // (YouTube: a jump means it loading again, so only when well off; a
+    // pause starting just freezes the picture where it is)
+    if (Math.abs(Player.time() - t) > (isYT(d) ? 3 : 2)) Player.jump(t);
     Player.hold(e.pause);
     return true;
   }
@@ -332,16 +348,25 @@
     // the episode's time is up, or a vote (or an admin) moved the schedule: catch up
     const d = byId(id), now = Date.now(), e = d && entryAt(d, now);
     if (!d) return;
+    // (YouTube: the next one has just begun, in its lead-in: the video
+    // that's on plays to its end first, if it's nearly there)
+    if (isYT(d) && e && e.start === playing.end && !e.off && !e.pause && !playing.pause && now - playing.end < (cutsOf(d, d.eps[e.i]).lead - 1) * 1000 &&
+      !Player.paused() && Player.time() < cutsOf(d, d.eps[playing.i]).end - 0.3) return;
     if (e && (e.pos !== playing.pos || e.start !== playing.start)) { if (!follow(d, e)) return retune(ch); }
     else if (!e && now >= playing.end) return retune(ch);
     else if (e) playing.end = e.end;
     Player.hold(playing.pause);
-    // YouTube's player takes a moment to start: once it's going, catch up to
-    // where the schedule is (only once: after that it plays on as it is)
+    // YouTube's player takes a moment to start (it began that much further
+    // in, or from the start in the lead-in): once it's going, see how far
+    // off it is, to start better next time, and only jump if it's well off
+    // (a jump means YouTube loading again, and showing its title again)
     if (isYT(d) && !playing.synced && !playing.pause && Player.time() > 0) {
       playing.synced = true;
-      const want = toMedia(d, d.eps[playing.i], chanAt(playing, now));
-      if (Math.abs(Player.time() - want) > 1.5) Player.jump(want);
+      const ep = d.eps[playing.i];
+      const off = fromMedia(d, ep, Player.time()) - chanAt(playing, now); // (behind: below 0)
+      // (much behind: an ad first, most likely, which says nothing about next time)
+      if (playing.mid && off > -8) ytLag = U.clamp(ytLag - off * 1000, 0, 6000);
+      if (Math.abs(off) > 3) Player.jump(toMedia(d, ep, chanAt(playing, now)));
     }
     if (!playing.subsDone) {
       playing.subsDone = true;
