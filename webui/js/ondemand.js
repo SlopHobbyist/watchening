@@ -833,7 +833,8 @@
       name: ep ? it.show : it.title,
       call: it.extra || (ep ? epCode(it) || srcLabel(src) : it.year ? String(it.year) : srcLabel(src)),
       desc: itemInfo(src, it).desc,
-      subs: pl.subs || [], burn: pl.burn || null, ours: !!pl.ours,
+      // (with the ones downloaded for it: Search for Subtitles, subsearch.js)
+      subs: (pl.subs || []).concat(SubSearch.cached(src, it)), burn: pl.burn || null, ours: !!pl.ours,
       src, item: it, play: pl,
     };
   }
@@ -842,10 +843,14 @@
     const pl = await providers[src.type].play(src, it, opts || {});
     const ch = vodChannel(src, it, pl);
     App.playVod(ch);
-    // subtitles: the server's pick, else (with Subtitles When Available on) the first
+    // subtitles: the server's pick, else (with Subtitles When Available on)
+    // the first of its own, else one downloaded for it in your language
     const pick = ch.subs.find((s) => s.selected && s.url) ||
-      (Store.cfg.prefs.ccDefault && !ch.burn && ch.subs.find((s) => s.url));
+      (Store.cfg.prefs.ccDefault && !ch.burn && (ch.subs.find((s) => s.url && !s.dl) || SubSearch.mine(ch.subs)));
     if (pick) showSub(ch, pick).catch(() => {});
+    // what's been downloaded for it (it may not be known yet)
+    const ctx = SubSearch.current();
+    if (ctx && App.vod() === ch) SubSearch.attach(ctx);
   }
 
   // ------------------------------------------------------- skipping, as Plex
@@ -911,7 +916,8 @@
     if (!v) return;
     const p = providers[v.src.type];
     const want = sub && !sub.url ? sub.id : null; // burned in
-    if (p.setSubtitle) p.setSubtitle(v.src, v.play, sub).catch(() => {});
+    // (a downloaded one isn't the server's: it's told none)
+    if (p.setSubtitle) p.setSubtitle(v.src, v.play, sub && sub.dl ? null : sub).catch(() => {});
     if (sub && sub.url) {
       try { await showSub(v, sub); } catch (e) { App.osd(`Couldn't load the subtitles: ${e.message}`, 4000); return; }
       App.osd(`Subtitles: ${sub.label}`);

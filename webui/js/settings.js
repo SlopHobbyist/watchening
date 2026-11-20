@@ -168,6 +168,14 @@
     return out;
   }
 
+  // Subtitle Language: "" is this TV's own (the browser's)
+  const SUB_LANGS = ["", "en", "es", "fr", "de", "it", "pt", "pt-BR", "nl", "sv", "no", "da", "fi", "pl", "cs", "ro", "hu", "el", "tr", "ru", "uk", "ar", "he", "fa", "hi", "zh", "ja", "ko", "vi", "id"];
+  function subLangName(tag) {
+    const names = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "language" }) : null;
+    const name = (t) => { try { return (names && names.of(t)) || t; } catch { return t; } };
+    return tag ? name(tag) : `Automatic (${name((navigator.language || "en").split("-")[0])})`;
+  }
+
   function optionRows() {
     const p = Store.cfg.prefs;
     return [
@@ -175,6 +183,15 @@
         text: "Subtitles When Available", tag: p.ccDefault ? "On" : "Off",
         info: { title: "Subtitles When Available", desc: "Turn subtitles on automatically when a channel has them. Press C while watching to switch them on or off. Yours alone: group settings don't include it." + (Sync.editing ? ` Changing it now changes your own, not ${Sync.editing.name}'s.` : "") },
         act: () => { App.setPrefs({ ccDefault: !p.ccDefault }); render(); },
+      },
+      {
+        text: "Subtitle Language", tag: subLangName(p.subLang),
+        info: { title: "Subtitle Language", desc: "The language Search for Subtitles (in Subtitle Options, Shift+C, while watching) shows first, and that Subtitles When Available turns on by itself when subtitles in it have been downloaded for a title. Automatic is this TV's language." },
+        act: () => {
+          const i = SUB_LANGS.indexOf(p.subLang || "");
+          App.setPrefs({ subLang: SUB_LANGS[(i + 1) % SUB_LANGS.length] });
+          render();
+        },
       },
       {
         text: "Subtitle Size", tag: ["Small", "Medium", "Large"][p.ccSize] || "Medium",

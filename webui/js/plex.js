@@ -445,6 +445,29 @@
     if (pl.session) send(src, "/video/:/transcode/universal/stop", { session: pl.session }, keepalive);
   }
 
+  /** What Plex knows of a title, for Search for Subtitles (subsearch.js):
+   *  { type: movie | series, imdb, title, year, season, episode, eptitle, aired, file }. */
+  async function lookup(src, it) {
+    const meta = async (id) => ((await pms(src, `/library/metadata/${id}`, { includeGuids: 1 })).Metadata || [])[0] || null;
+    const imdb = (m) => {
+      for (const g of (m && m.Guid) || []) { const x = /^imdb:\/\/(tt\d+)/.exec(g.id || ""); if (x) return x[1]; }
+      const old = /imdb:\/\/(tt\d+)/.exec((m && m.guid) || ""); // the old agents
+      return old ? old[1] : "";
+    };
+    const m = await meta(it.id);
+    if (!m) throw new Error("Plex couldn't find that title");
+    const part = (((m.Media || [])[0] || {}).Part || [])[0];
+    const file = part && part.file ? part.file.split(/[\\/]/).pop() : "";
+    if (m.type === "episode") {
+      const show = m.grandparentRatingKey != null ? await meta(m.grandparentRatingKey).catch(() => null) : null;
+      return {
+        type: "series", imdb: imdb(show), title: m.grandparentTitle || it.show, year: show && show.year,
+        season: m.parentIndex, episode: m.index, eptitle: m.title, aired: m.originallyAvailableAt, file,
+      };
+    }
+    return { type: "movie", imdb: imdb(m), title: m.title, year: m.year, file };
+  }
+
   async function setSubtitle(src, pl, sub) {
     if (!pl.part) return;
     const href = url(src.server.uri, `/library/parts/${pl.part}`, { subtitleStreamID: sub ? sub.id : 0, allParts: 1, "X-Plex-Token": src.server.token });
@@ -592,7 +615,7 @@
       return `Plex Media Server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
     reconnect,
-    root, views, list, search, play, release, setSubtitle, episodes, trailer, markers,
+    root, views, list, search, play, release, setSubtitle, lookup, episodes, trailer, markers,
     /** A show's logo (its clearLogo, small, through Plex's image resizer), for the guide. */
     logo(src, showId) {
       return url(src.server.uri, "/photo/:/transcode", {

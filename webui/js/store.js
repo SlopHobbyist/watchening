@@ -12,7 +12,7 @@
  *               file: an uploaded playlist's copy on the server, see sync.js)
  *   order:  [channel keys]   custom channel order (keys: "<playlist id>|<stream url>")
  *   hidden: [channel keys]
- *   prefs:  { epgUrl, ccDefault, ccSize, proxy, chanIcons, squish, wide }
+ *   prefs:  { epgUrl, ccDefault, ccSize, subLang, proxy, chanIcons, squish, wide }
  *           (chanIcons: built-in icons for channels without one, see logos.js;
  *            squish: 16:9 output squeezed onto a 4:3 TV, see fit() in main.js;
  *            wide: 16:9 layout for a widescreen display, see fit() in main.js;
@@ -39,7 +39,7 @@
     playlists: [],
     order: [],
     hidden: [],
-    prefs: { epgUrl: "", ccDefault: false, ccSize: 1, proxy: "", chanIcons: true, squish: false, wide: true },
+    prefs: { epgUrl: "", ccDefault: false, ccSize: 1, subLang: "", proxy: "", chanIcons: true, squish: false, wide: true },
     last: "",
     ccOffsets: {},   // channel key -> subtitle offset (seconds)
     screen: {},      // screen options for every channel: { aspect, scale, crop, overscan, splitScan, overscanY }

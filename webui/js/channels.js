@@ -268,7 +268,9 @@
       throw new Error("Tuning...");
     }
     release();
-    playing = Object.assign({ id, src, pl, subs: pl.subs || [], subsDone: false, markers: pl.markers || null }, e);
+    // (with the subtitles downloaded for it: Search for Subtitles, subsearch.js)
+    playing = Object.assign({ id, src, pl, item, subs: (pl.subs || []).concat(SubSearch.cached(src, item)), subsDone: false, markers: pl.markers || null }, e);
+    SubSearch.attach(ctxOf(playing));
     // (starting it took a moment: begin that much further in)
     return { url: pl.url, ours: !!pl.ours, start: toMedia(d, ep, chanAt(e, Date.now())) };
   }
@@ -316,6 +318,19 @@
     const text = await U.fetchText(sub.url);
     if (Player.ch !== ch) return;
     Player.loadSubs(sub.label, text);
+  }
+
+  /** The episode playing, for Search for Subtitles (see subsearch.js). */
+  function ctxOf(p) {
+    return {
+      src: p.src, item: p.item, pl: p.pl, list: p.subs,
+      alive: () => playing === p && !!Player.ch && Player.ch.custom === p.id,
+      show: (sub) => showSub(sub).then(() => App.osd(`Subtitles: ${sub.label}`), (e) => App.osd(`Couldn't load the subtitles: ${e.message}`, 4000)),
+    };
+  }
+  function current() {
+    const ch = Player.ch;
+    return playing && playing.pl && playing.item && ch && ch.custom === playing.id && !ch.vod ? ctxOf(playing) : null;
   }
 
   // -------------------------------------------------------------- watching
@@ -370,7 +385,8 @@
     }
     if (!playing.subsDone) {
       playing.subsDone = true;
-      const sub = playing.subs.find((s) => s.url && s.selected) || playing.subs.find((s) => s.url);
+      const sub = playing.subs.find((s) => s.url && s.selected) || playing.subs.find((s) => s.url && !s.dl) || SubSearch.mine(playing.subs) ||
+        (wantSubs && playing.subs.find((s) => s.url));
       if (sub && (wantSubs || Store.cfg.prefs.ccDefault)) showSub(sub).catch(() => {});
       wantSubs = false;
     }
@@ -1295,7 +1311,11 @@
     seek,
     skipPop,
     /** The playing channel's subtitle file, if it has one (for C). */
-    subFile: () => (playing && Player.ch && playing.id === Player.ch.custom ? playing.subs.find((s) => s.url) || null : null),
+    subFile: () => (playing && Player.ch && playing.id === Player.ch.custom
+      ? playing.subs.find((s) => s.url && !s.dl) || SubSearch.mine(playing.subs) || playing.subs.find((s) => s.url) || null : null),
+    /** The episode playing's subtitle files ({ id, label, url, dl }), for Subtitle Options. */
+    subs: () => (current() ? playing.subs.filter((s) => s.url) : []),
+    current,
     showSub,
     settingsRows,
     count: () => C.defs.length,

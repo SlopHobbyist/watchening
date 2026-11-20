@@ -492,7 +492,7 @@
     let burn = opts.burn;
     if (burn === undefined) { const sel = subs.find((x) => x.selected && !x.url); burn = sel ? sel.id : null; }
     const rate = ms.Bitrate ? Math.min(ms.Bitrate / 1000, q.kbps) : q.kbps;
-    const base = { start, dur, subs, burn, session: info.PlaySessionId || "", source: ms.Id, auto: q.auto, rate, markers: marks };
+    const base = { start, dur, subs, burn, session: info.PlaySessionId || "", source: ms.Id, auto: q.auto, rate, markers: marks, file: fileName(ms.Path) };
 
     if (ms.SupportsDirectPlay) {
       const boxes = String(ms.Container || "").toLowerCase().split(",");
@@ -671,7 +671,34 @@
     return {
       url: proxied(src, ms), ours: true, start, dur, subs, burn: null,
       method: "DirectPlay", session: info.PlaySessionId || "", source: ms.Id,
+      file: (ms.aiostreams || {}).filename || fileName(ms.Path) || ms.Name || "",
     };
+  }
+
+  /** "/media/Movie (2001).mkv" -> "Movie (2001).mkv" */
+  const fileName = (p) => (p && !/^\/aiostreams\//.test(p) ? String(p).split(/[\\/]/).pop() : "");
+
+  /** What the server knows of a title, for Search for Subtitles (subsearch.js):
+   *  { type: movie | series, imdb, title, year, season, episode, eptitle, aired, file }. */
+  async function lookup(src, it, pl) {
+    // (with fields, so AIOStreams doesn't look the streams up)
+    const get = (id) => api(src, `/Items/${id}`, user(src, { fields: FIELDS + ",ProviderIds,Path" }));
+    const imdb = (m) => {
+      const ids = (m && m.ProviderIds) || {};
+      const k = Object.keys(ids).find((x) => x.toLowerCase() === "imdb");
+      return k && /^tt\d+$/.test(ids[k]) ? ids[k] : "";
+    };
+    const m = await get(it.id);
+    const file = (pl && pl.file) || fileName(m.Path);
+    if (m.Type === "Episode") {
+      const show = m.SeriesId ? await get(m.SeriesId).catch(() => null) : null;
+      return {
+        type: "series", imdb: imdb(show), title: m.SeriesName || it.show, year: show && show.ProductionYear,
+        season: m.ParentIndexNumber ?? it.season, episode: m.IndexNumber ?? it.episode,
+        eptitle: m.Name || it.title, aired: String(m.PremiereDate || "").slice(0, 10), file,
+      };
+    }
+    return { type: "movie", imdb: imdb(m), title: m.Name || it.title, year: m.ProductionYear, file };
   }
 
   const progress = (it, pl, sec) => ({
@@ -881,7 +908,7 @@
     describe(src) {
       return `Jellyfin server${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
-    root, views, list, search, play, release, episodes, trailer, markers,
+    root, views, list, search, play, release, lookup, episodes, trailer, markers,
     /** A show's logo, for the guide. */
     logo(src, showId) {
       return url(src.server.uri, `/Items/${showId}/Images/Logo`, { maxHeight: 96, format: "Png", ApiKey: src.server.token });
@@ -906,7 +933,7 @@
     describe(src) {
       return `Stremio addons through AIOStreams${src.user ? `, signed in as ${src.user}` : ""}. Address: ${src.server.uri}`;
     },
-    root, views, list, search, play, versions, episodes,
+    root, views, list, search, play, versions, lookup, episodes,
     report,
     stopped(src, it, pl, sec, leaving) {
       return send(src, "/Sessions/Playing/Stopped", progress(it, pl, sec), leaving);

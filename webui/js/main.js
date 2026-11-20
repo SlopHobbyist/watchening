@@ -1080,13 +1080,13 @@
       const v = S.vod;
       if (v && v.burn) { OnDemand.chooseSub(null); return; } // subtitles drawn into the picture
       const label = Player.toggleCC();
-      const file = v && v.subs.find((x) => x.url);
+      const file = v && (v.subs.find((x) => x.url && !x.dl) || SubSearch.mine(v.subs) || v.subs.find((x) => x.url));
       const chanFile = !v && Player.ch && Player.ch.custom ? Channels.subFile() : null;
       if (label === null && file) OnDemand.chooseSub(file);
       else if (label === null && chanFile) {
         Channels.showSub(chanFile).then(() => osd(`Subtitles: ${chanFile.label}`), (e) => osd(`Couldn't load the subtitles: ${e.message}`, 4000));
       }
-      else if (label === null) osd("No subtitles in this stream. See Subtitles for more options.", 4000);
+      else if (label === null) osd(SubSearch.current() ? "No subtitles in this video. Subtitle Options (Shift+C) can search for some." : "No subtitles in this stream. See Subtitles for more options.", 4000);
       else osd(label === "Off" ? "Subtitles Off" : `Subtitles: ${label}`);
       if (pbarShown()) renderPbar();
     },
@@ -1130,7 +1130,10 @@
   const CC_SIZES = ["Small", "Medium", "Large"];
   function subtitleRows() {
     const v = S.vod;
-    const vodSubs = v ? v.subs : [];
+    // the title's subtitles (On Demand), or the custom channel episode's files
+    const vodSubs = v ? v.subs : Channels.subs();
+    const chooseSub = (s) => { const c = !v && Channels.current(); return v ? OnDemand.chooseSub(s) : c ? c.show(s) : null; };
+    const subOn = (s) => (v ? OnDemand.subOn(s) : Player.cc === Player.EXT && Player.extName === s.label);
     // a subtitle file from the server has its own row, not a loaded file's
     const fromServer = (x) => x.t === Player.EXT && vodSubs.some((s) => s.url && s.label === Player.extName);
     const tracks = Player.ccTracks().filter((x) => !fromServer(x));
@@ -1158,10 +1161,11 @@
     }
     for (const s of vodSubs) {
       rows.push({
-        label: s.label, check: OnDemand.subOn(s),
-        desc: s.url ? "A subtitle file on the server."
+        label: s.label, check: subOn(s),
+        desc: s.dl ? `Downloaded from OpenSubtitles, and kept on this server for everyone who plays this. ${s.dl.name || s.dl.release}`
+          : s.url ? "A subtitle file on the server."
           : "Subtitles inside the video, drawn into the picture by the server. Changing them starts the picture again where it was.",
-        act: () => OnDemand.chooseSub(s),
+        act: () => chooseSub(s),
       });
     }
     for (const x of tracks) {
@@ -1187,6 +1191,12 @@
       desc: "Size of the subtitle text. The same for every channel.",
       step: (d) => App.setPrefs({ ccSize: U.clamp(Player.ccSize() + d, 0, 2) }),
       act: () => App.setPrefs({ ccSize: (Player.ccSize() + 1) % 3 }),
+    });
+    const found = SubSearch.current();
+    if (found) rows.push({
+      label: "Search for Subtitles...",
+      desc: "Find subtitles for this on OpenSubtitles, in any language, as Plex does. The one you pick is kept with this title on the server, for everyone who plays it.",
+      act: () => SubSearch.open(found, () => togglePanel("subs", subsFromCtl)),
     });
     rows.push({
       label: "Load Subtitle File...",
@@ -1280,9 +1290,11 @@
     screen: { title: "Display Options", rows: screenRows },
     vote: { title: "Vote", rows: () => Channels.voteRows() },
   };
+  let subsFromCtl = false; // Subtitle Options was opened from the controls (Back from a search goes back to it, then them)
   function togglePanel(id, fromCtl) {
     if (Panel.id() === id) return Panel.close();
     if (App.mode !== "watch" || !playing()) return;
+    if (id === "subs") { subsFromCtl = !!fromCtl; SubSearch.refresh(); }
     hideBanner();
     hidePbar();
     Panel.open(Object.assign({ id, onBack: fromCtl ? () => openCtl(id) : null }, PANELS[id]));

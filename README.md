@@ -5,7 +5,7 @@ A cable box simulator! Watch IPTV and Plex/Jellyfin with a classic cable aesthet
 ## Features
 ### Screens
 - **Interactive guide** - in the style of the 2005 Comcast iGuide
-- **Video player** - can display subtitles and change aspect ratios
+- **Video player** - can display subtitles, search OpenSubtitles for missing ones like Plex does, and change aspect ratios
 - **On Demand** - can play pre recorded media from various sources
 - **Custom channels** - 24 hour channels that play a show from Plex or Jellyfin, or a YouTube channel or playlist, in order or shuffled
 - **Account management** - can remotely manage settings for family members and novices
@@ -109,6 +109,33 @@ played as they are, never converted: MP4 and MKV with H.264 play everywhere,
 HEVC, Dolby Vision, DTS and TrueHD often don't in a browser, so On Demand
 prefers versions that will.
 
+### Subtitles
+
+Subtitles in the video or next to it (from Plex, Jellyfin or a Stremio
+addon) are listed in **Subtitle Options** (Shift+C, or CC on the control bar)
+while watching. When a movie or episode has none, or not in your language,
+**Search for Subtitles...** there looks it up on
+[OpenSubtitles](https://www.opensubtitles.org), the way Plex's own
+subtitle search does. It works in On Demand and on custom channels.
+
+Results come in every language (◀▶ on **Language**), with the ones made for
+the same release as your video first, since they're the likeliest to be in
+step. Picking one downloads it to this server and shows it. It's kept with
+the title, so everyone who plays it afterwards (everyone on a custom channel
+when the episode comes round) finds it in Subtitle Options as
+"English (OpenSubtitles)". **Subtitles When Available** turns it on by itself
+when it's in your **Subtitle Language** (`Settings > Options`). If one is out
+of step, nudge it with **Offset**, or remove it from the search and pick
+another.
+
+No account or API key is needed: the server searches through
+[Stremio's OpenSubtitles addon](https://opensubtitles-v3.strem.io), by the IMDb
+id Plex or Jellyfin has for the title. When they don't have one, it finds the
+id with [Cinemeta](https://v3-cinemeta.strem.io) from the title and year.
+Episodes are matched by their title too, since Plex and Jellyfin sometimes
+number a show's seasons differently from IMDb and OpenSubtitles (Futurama, for
+one). Downloads are kept in `data/subtitles/`.
+
 ### Custom channels
 
 Make channels out of the shows on your Plex or Jellyfin server under
@@ -206,8 +233,8 @@ It's built on these projects, each under its own license:
 The Comcast and TV Guide logos and the channel logos in `webui/assets/` are
 trademarks of their owners. They're used here only to identify the channels,
 and Watchening isn't affiliated with or endorsed by any of them. The same goes
-for Plex, Jellyfin, Stremio, YouTube, zlive and the debrid services, which
-Watchening connects to but doesn't include. Skip times for YouTube videos come
+for Plex, Jellyfin, Stremio, YouTube, zlive, OpenSubtitles and the debrid
+services, which Watchening connects to but doesn't include. Skip times for YouTube videos come
 from [SponsorBlock](https://sponsor.ajay.app), whose data is under
 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 

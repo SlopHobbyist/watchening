@@ -47,6 +47,14 @@
  *     POST   /:id/unvote {viewer}
  *     POST   /:id/unplayable {viewer, start, code}   YouTube won't play the
  *                                    video on now here: everyone skips it
+ *   /api/subtitles...              subtitles from OpenSubtitles, kept with each
+ *                                  title for everyone (see subtitles.mjs):
+ *     GET    /search?type&imdb&title&year&season&episode&file
+ *                                    {key, saved, results} (every language)
+ *     GET    /saved?(the same)       {key, saved}: what's been downloaded for it
+ *     POST   /keep {key, id}         download a result and keep it: {saved, sub}
+ *     POST   /drop {key, id}         forget one: {saved}
+ *     GET    /file/:id               a kept subtitle (SRT)
  *
  * On first start (no accounts yet) it makes an admin account with a random
  * password, prints it and writes it to data/admin-login.txt. That file is
@@ -63,6 +71,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import * as Settings from "./settings.mjs";
 import * as Channels from "./channels.mjs";
+import * as Subtitles from "./subtitles.mjs";
 
 const AUTH = !/^(off|false|no|0)$/i.test((process.env.AUTH || "on").trim());
 const PUBLIC_URL = ((process.env.PUBLIC_URL || "").trim() || "http://localhost:8080").replace(/\/+$/, "");
@@ -577,6 +586,34 @@ async function channelsApi(req, res, rest) {
   }
 }
 
+// --------------------------------------------------------------- subtitles
+async function subtitlesApi(req, res, rest) {
+  const { user } = await caller(req);
+  if (AUTH && !user) throw new HttpError(401, "Sign in first");
+  if (req.method !== "GET" && !sameSite(req)) throw new HttpError(403, "Changes must come from this site");
+  try {
+    if ((rest === "/search" || rest === "/saved") && req.method === "GET") {
+      const q = Object.fromEntries(new URL(req.url, "http://x").searchParams);
+      return send(res, 200, rest === "/search" ? await Subtitles.search(q) : await Subtitles.saved(q));
+    }
+    if ((rest === "/keep" || rest === "/drop") && req.method === "POST") {
+      const b = await readJson(req);
+      if (rest === "/drop") return send(res, 200, Subtitles.drop(b.key, b.id));
+      return send(res, 200, await Subtitles.keep(b.key, b.id, user ? user.username : ""));
+    }
+    const f = /^\/file\/([a-z0-9]{3,20})$/i.exec(rest);
+    if (f && req.method === "GET") {
+      const text = Subtitles.file(f[1]);
+      res.writeHead(200, { "content-type": "application/x-subrip; charset=utf-8", "cache-control": "private, max-age=86400" });
+      return res.end(text);
+    }
+    throw new HttpError(404, "Not found");
+  } catch (e) {
+    if (e instanceof Subtitles.SubtitleError) throw new HttpError(e.status, e.message);
+    throw e;
+  }
+}
+
 let warnedProto = false;
 let lastFileCheck = 0; // an admin's page loads also check data/admin-login.txt (see checkLoginFile)
 const server = http.createServer(async (req, res) => {
@@ -607,6 +644,7 @@ const server = http.createServer(async (req, res) => {
 
     if (path === "/api/settings" || path.startsWith("/api/settings/")) return await settingsApi(req, res, path.slice("/api/settings".length));
     if (path === "/api/channels" || path.startsWith("/api/channels/")) return await channelsApi(req, res, path.slice("/api/channels".length));
+    if (path.startsWith("/api/subtitles/")) return await subtitlesApi(req, res, path.slice("/api/subtitles".length));
 
     const m = /^\/api\/admin\/((?:users|groups)(?:\/[^/]+(?:\/[^/]+)?)?)$/.exec(path);
     if (m) {
