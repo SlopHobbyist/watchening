@@ -839,18 +839,32 @@
     };
   }
 
+  /** Whether `it` goes on from what's playing: the same show (its next
+   *  episode, another of its episodes, Continue in On Demand from a custom
+   *  channel) or the same title again. */
+  function goesOn(it) {
+    const v = App.vod();
+    const was = v && Player.ch === v ? v.item : (Channels.current() || {}).item;
+    if (!was) return false;
+    if (was.id === it.id) return true;
+    if (it.type !== "episode" || was.type !== "episode") return false;
+    return it.showId && was.showId ? it.showId === was.showId : !!it.show && it.show === was.show;
+  }
+
   async function play(src, it, opts) {
+    // subtitles on for the show so far stay on for this
+    const keep = Player.wantsCC() && goesOn(it);
     const pl = await providers[src.type].play(src, it, opts || {});
     const ch = vodChannel(src, it, pl);
-    App.playVod(ch);
-    // subtitles: the server's pick, else (with Subtitles When Available on)
-    // the first of its own, else one downloaded for it in your language
-    const pick = ch.subs.find((s) => s.selected && s.url) ||
-      (Store.cfg.prefs.ccDefault && !ch.burn && (ch.subs.find((s) => s.url && !s.dl) || SubSearch.mine(ch.subs)));
-    if (pick) showSub(ch, pick).catch(() => {});
-    // what's been downloaded for it (it may not be known yet)
+    App.playVod(ch, false, keep);
     const ctx = SubSearch.current();
     if (ctx && App.vod() === ch) SubSearch.attach(ctx);
+    if (ch.burn) return; // (the server's pick, drawn into the picture)
+    // wanted (kept on, or Subtitles When Available): the best there is,
+    // found on OpenSubtitles if need be; else the server's own pick, if any
+    if (Player.ccWanted && ctx) { SubSearch.ensure(ctx); return; }
+    const pick = ch.subs.find((s) => s.selected && s.url) || (Player.ccWanted && ch.subs.find((s) => s.url && !s.dl));
+    if (pick) showSub(ch, pick).catch(() => {});
   }
 
   // ------------------------------------------------------- skipping, as Plex

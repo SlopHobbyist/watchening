@@ -7,8 +7,12 @@
  * downloads it to the server, where it's kept with the title, and shows it.
  * Everyone who plays that title from then on (everyone on a custom channel
  * when it comes round) has it in Subtitle Options, as "English
- * (OpenSubtitles)", and Subtitles When Available turns it on by itself when
- * it's in their language and the video has no subtitles of its own.
+ * (OpenSubtitles)".
+ *
+ * Wanting subtitles finds them too: when they were on for the show before
+ * (a custom channel's next episode, the next episode in On Demand) or
+ * Subtitles When Available is on, a title with none in your language gets
+ * the best match downloaded and turned on by itself (ensure, below).
  *
  * The title is identified by what its media server knows of it (the
  * provider's lookup(src, item, play): its IMDb id, name, year, season and
@@ -17,12 +21,15 @@
  *   SubSearch.cached(src, item)   the title's downloads, as subs entries
  *                                 ({ id, label, url, lang, dl }), if known
  *   SubSearch.attach(ctx)         after a title starts: get its downloads
+ *   SubSearch.ensure(ctx, opts)   subtitles wanted: turn on the best there is,
+ *                                 finding and downloading some if need be
  *   SubSearch.current()           what's playing that can be searched for (a ctx)
  *   SubSearch.open(ctx, onBack)   the search, in the pop-out panel
  *   SubSearch.mine(subs)          a download in this person's language
  *
  *   ctx = { src, item, pl, list (the subs the player lists, kept up to date),
- *           alive() (still playing), show(sub) (show one, a promise) }
+ *           alive() (still playing), show(sub) (show one, a promise),
+ *           burn (picture subtitles are drawn in now), burnable (they can be) }
  */
 (function () {
   "use strict";
@@ -103,18 +110,67 @@
     return r;
   }
 
-  /** A title has started: its downloads join its subtitles, and with
-   *  Subtitles When Available on, one in your language shows if the video
-   *  has none of its own. */
+  /** A title has started: its downloads join its subtitles (for Subtitle Options). */
   function attach(ctx) {
     if (!searchable(ctx.src)) return;
-    refresh(ctx).then(() => {
-      if (!ctx.alive()) return;
-      if (Panel.id() === "subs") Panel.refresh();
-      if (!Store.cfg.prefs.ccDefault || Player.cc || ctx.burn || ctx.list.some((s) => s.url && !s.dl)) return;
-      const s = mine(ctx.list);
-      if (s) ctx.show(s).catch(() => {});
-    }).catch(() => { /* no IMDb id, or the server's busy: nothing to add */ });
+    refresh(ctx).then(() => { if (ctx.alive() && Panel.id() === "subs") Panel.refresh(); })
+      .catch(() => { /* no IMDb id, or the server's busy: nothing to add */ });
+  }
+
+  const names = (() => { try { return new Intl.DisplayNames(["en"], { type: "language" }); } catch { return null; } })();
+  const langName = (l) => { try { return (names && names.of(base(l))) || l; } catch { return l; } };
+  /** A server subtitle's language, as "en" (Plex says "en" or "eng",
+   *  Jellyfin "eng"; without one, by its name: "English (SRT External)"). */
+  function langOf(s) {
+    if (s.lang) {
+      try { return base(Intl.getCanonicalLocales(s.lang)[0]); } catch { return base(s.lang); }
+    }
+    return String(s.label || "").toLowerCase().startsWith(langName(want()).toLowerCase()) ? base(want()) : "";
+  }
+  const isMine = (s) => langOf(s) === base(want());
+
+  /**
+   * Subtitles are wanted for the title that's just started (they were on for
+   * the show before, Subtitles When Available is on, or C was pressed with
+   * none to turn on): on with the best there is. In order: the server's own
+   * file, its pick or in your language; one downloaded for the title before,
+   * or failing that one found on OpenSubtitles now (downloaded and kept, for
+   * everyone); picture subtitles in your language, drawn in by the server
+   * (On Demand); the server's own file in another language.
+   * Gives up as soon as subtitles are turned on or off meanwhile.
+   * opts.say: say it's looking (C pressed)
+   */
+  const running = new WeakSet(); // ctx.list (one per title playing)
+  async function ensure(ctx, opts) {
+    if (!ctx || running.has(ctx.list) || !ctx.alive() || Player.cc || ctx.burn) return;
+    running.add(ctx.list);
+    try {
+      const stop = () => !ctx.alive() || !!Player.cc || !Player.ccWanted;
+      const own = ctx.list.filter((x) => x.url && !x.dl && !x.forced);
+      const first = own.find((x) => x.selected) || own.find(isMine);
+      if (first) return void (await ctx.show(first));
+      let found = null, err = null;
+      if (searchable(ctx.src)) {
+        if (opts && opts.say) App.osd(`Looking for ${langName(want())} subtitles...`, 20000);
+        try {
+          const m = await meta(ctx);
+          if (stop()) return;
+          const r = await api("POST", "/api/subtitles/auto", Object.assign({}, m, { lang: want() }));
+          if (!ctx.alive()) return;
+          setSaved(ctx, r.key, r.saved);
+          if (Panel.id() === "subs") Panel.refresh();
+          if (r.sub) found = ctx.list.find((x) => x.dl && x.dl.id === r.sub.id) || null;
+        } catch (e) {
+          err = e;
+        }
+      }
+      if (stop()) return;
+      const pick = found || (ctx.burnable && ctx.list.find((x) => !x.url && !x.forced && isMine(x))) || own[0];
+      if (pick) return void (await ctx.show(pick));
+      App.osd(`No ${langName(want())} subtitles found for this` + (err ? ` (${err.message})` : ""), 4000);
+    } catch { /* (showing it said why it couldn't) */ } finally {
+      running.delete(ctx.list);
+    }
   }
 
   /** What's playing, if subtitles can be searched for it. */
@@ -123,7 +179,7 @@
     if (v) {
       if (Player.ch !== v || !searchable(v.src)) return null;
       return {
-        src: v.src, item: v.item, pl: v.play, list: v.subs, burn: v.burn,
+        src: v.src, item: v.item, pl: v.play, list: v.subs, burn: v.burn, burnable: true,
         alive: () => App.vod() === v && Player.ch === v,
         show: (s) => OnDemand.chooseSub(s),
       };
@@ -290,7 +346,7 @@
   }
 
   window.SubSearch = {
-    cached, attach, current, open, mine,
+    cached, attach, ensure, current, open, mine,
     /** Subtitle Options opened: fetch the downloads again (someone else on
      *  the channel may have just got one). */
     refresh: () => {

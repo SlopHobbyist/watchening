@@ -399,6 +399,7 @@
 
     const subs = streams.filter((x) => x.streamType === 3 && (x.key ? TEXT_SUBS.test(x.codec || "") : true)).map((x) => ({
       id: x.id, label: x.extendedDisplayTitle || x.displayTitle || x.language || "Subtitles", selected: !!x.selected,
+      lang: x.languageTag || x.languageCode || "", forced: !!x.forced,
       url: x.key ? url(s.uri, x.key, { encoding: "utf-8", "X-Plex-Token": s.token }) : "",
     }));
     let burn = opts.burn;

@@ -123,10 +123,17 @@ the same release as your video first, since they're the likeliest to be in
 step. Picking one downloads it to this server and shows it. It's kept with
 the title, so everyone who plays it afterwards (everyone on a custom channel
 when the episode comes round) finds it in Subtitle Options as
-"English (OpenSubtitles)". **Subtitles When Available** turns it on by itself
-when it's in your **Subtitle Language** (`Settings > Options`). If one is out
-of step, nudge it with **Offset**, or remove it from the search and pick
-another.
+"English (OpenSubtitles)". If one is out of step, nudge it with **Offset**, or
+remove it from the search and pick another (a removed one is never picked
+again by itself).
+
+Subtitles you turn on stay on for the rest of the show: a custom channel's
+next episode, the next episode in On Demand (Skip Credits, or picking it), and
+**Continue in On Demand**. Whatever comes on gets the best subtitles there are
+in your **Subtitle Language** (`Settings > Options`): the server's own, else one
+downloaded before, else the best match on OpenSubtitles, downloaded by itself.
+With **Subtitles When Available** on, that happens for everything you play.
+Pressing C on a title with no subtitles does the same.
 
 No account or API key is needed: the server searches through
 [Stremio's OpenSubtitles addon](https://opensubtitles-v3.strem.io), by the IMDb

@@ -53,6 +53,8 @@
  *                                    {key, saved, results} (every language)
  *     GET    /saved?(the same)       {key, saved}: what's been downloaded for it
  *     POST   /keep {key, id}         download a result and keep it: {saved, sub}
+ *     POST   /auto {(as search), lang}   subtitles in that language, downloaded and
+ *                                    kept if none were: {key, saved, sub | null}
  *     POST   /drop {key, id}         forget one: {saved}
  *     GET    /file/:id               a kept subtitle (SRT)
  *
@@ -595,6 +597,12 @@ async function subtitlesApi(req, res, rest) {
     if ((rest === "/search" || rest === "/saved") && req.method === "GET") {
       const q = Object.fromEntries(new URL(req.url, "http://x").searchParams);
       return send(res, 200, rest === "/search" ? await Subtitles.search(q) : await Subtitles.saved(q));
+    }
+    if (rest === "/auto" && req.method === "POST") {
+      const b = await readJson(req);
+      const q = {};
+      for (const [k, v] of Object.entries(b || {})) if (v != null && typeof v !== "object") q[k] = String(v);
+      return send(res, 200, await Subtitles.auto(q, user ? user.username : ""));
     }
     if ((rest === "/keep" || rest === "/drop") && req.method === "POST") {
       const b = await readJson(req);

@@ -486,6 +486,7 @@
 
     const subs = (ms.MediaStreams || []).filter((x) => x.Type === "Subtitle").map((x) => ({
       id: x.Index, label: x.DisplayTitle || x.Language || "Subtitles", selected: x.Index === ms.DefaultSubtitleStreamIndex,
+      lang: x.Language || "", forced: !!x.IsForced,
       url: isText(x) ? url(s.uri, `/Videos/${it.id}/${ms.Id}/Subtitles/${x.Index}/0/Stream.vtt`, { ApiKey: s.token }) : "",
     }));
     // Jellyfin's own pick (the user's subtitle settings) is drawn in if it's a picture one
@@ -665,6 +666,7 @@
       .filter((x) => x.Type === "Subtitle" && (x.DeliveryMethod === "External" || x.IsExternal) && x.DeliveryUrl)
       .map((x) => ({
         id: x.Index, label: x.DisplayTitle || x.Language || "Subtitles", selected: x.Index === ms.DefaultSubtitleStreamIndex,
+        lang: x.Language || "", forced: !!x.IsForced,
         url: /^https?:/i.test(x.DeliveryUrl) ? x.DeliveryUrl
           : x.DeliveryUrl.startsWith("/jellyfin/") ? origin + x.DeliveryUrl : s.uri.replace(/\/+$/, "") + x.DeliveryUrl,
       }));

@@ -498,12 +498,16 @@
 
   /** Tune `ch`. `isReload` re-opens the same channel after a stall, keeping
    *  its subtitle choice and offset. */
-  P.load = async (ch, isReload) => {
+  /** Play `ch`. isReload: the same again (after a stall). keepCC: what
+   *  comes on next (a channel's next episode): subtitles stay wanted if they
+   *  were on, and are on for it as soon as it has some. */
+  P.load = async (ch, isReload, keepCC) => {
     // reloading an On Demand title picks up where it stalled
     const at = isReload && ch && ch === P.ch && ch.vod && P.time() > 0 ? P.time() : null;
     const my = ++P.token;
+    const wanted = P.wantsCC();
     teardown();
-    if (!isReload) { P.reloads = 0; resetCC(); }
+    if (!isReload) { P.reloads = 0; resetCC(); if (keepCC && wanted) P.ccWanted = true; }
     P.ch = ch;
     P.held = false;
     P.startAt = at != null ? at : (ch && ch.start) || 0;
@@ -849,6 +853,9 @@
     if (P.cc && P.cc !== EXT && !textTracks().includes(P.cc)) setCC(null);
   });
   video.textTracks.addEventListener("change", applyModes);
+
+  /** Whether subtitles are on, or wanted as soon as there are some. */
+  P.wantsCC = () => !!(P.cc || P.ccWanted || (P.yt && P.ytCC));
 
   /** Choose a subtitle track (null: off). */
   P.setTrack = (t) => {

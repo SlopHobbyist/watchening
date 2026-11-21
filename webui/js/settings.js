@@ -181,7 +181,7 @@
     return [
       {
         text: "Subtitles When Available", tag: p.ccDefault ? "On" : "Off",
-        info: { title: "Subtitles When Available", desc: "Turn subtitles on automatically when a channel has them. Press C while watching to switch them on or off. Yours alone: group settings don't include it." + (Sync.editing ? ` Changing it now changes your own, not ${Sync.editing.name}'s.` : "") },
+        info: { title: "Subtitles When Available", desc: "Turn subtitles on for everything that has them. Movies and shows from Plex, Jellyfin or Stremio (On Demand and custom channels) that have none in your Subtitle Language get some from OpenSubtitles by themselves. Off, subtitles you turn on stay on for the rest of the show (its next episodes). Press C while watching to switch them on or off. Yours alone: group settings don't include it." + (Sync.editing ? ` Changing it now changes your own, not ${Sync.editing.name}'s.` : "") },
         act: () => { App.setPrefs({ ccDefault: !p.ccDefault }); render(); },
       },
       {

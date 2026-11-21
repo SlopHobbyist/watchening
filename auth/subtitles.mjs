@@ -14,8 +14,13 @@
  * (Stremio's catalog) turns into one. An episode's season and number are
  * checked against IMDb's (see imdbNumbers), which OpenSubtitles goes by.
  *
+ * A TV that wants subtitles (Subtitles When Available, or they were on for
+ * the show before) and finds none in its language asks for some by itself
+ * (auto): the best match in its language is downloaded and kept the same way.
+ *
  * Kept in /data/subtitles: index.json lists each title's downloads
- * ({ titles: { "tt0108778:1:1": [{ id, lang, name, release, at, by }] } }),
+ * ({ titles: { "tt0108778:1:1": [{ id, lang, name, release, at, by }] },
+ * dropped: { key: [ids removed, never picked by themselves again] } }),
  * and files/<id>.srt holds them.
  */
 import fs from "node:fs";
@@ -286,40 +291,48 @@ const KEY = /^tt\d{5,10}(:\d{1,4}:\d{1,4})?$/;
 const ID = /^os\d{1,15}$/;
 
 /** Download a search result and keep it with its title: { saved, sub }. */
+const fetching = new Map(); // id -> promise of the download (two TVs asking at once share it)
 export async function keep(key, id, by) {
   if (!KEY.test(String(key)) || !ID.test(String(id))) fail(400, "Which subtitle?");
   load();
-  const list = store.titles[key] || [];
-  let x = list.find((y) => y.id === id);
-  if (!x) {
+  if (!(store.titles[key] || []).some((y) => y.id === id)) {
     const f = found.get(id);
     if (!f || f.key !== key) fail(404, "That search has expired. Search again");
-    if (!fs.existsSync(fileOf(id))) {
-      let res;
-      try {
-        res = await fetch(f.url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(30000) });
-      } catch {
-        fail(502, "Couldn't download it from OpenSubtitles. Try again, or pick another");
-      }
-      if (!res.ok) fail(502, `OpenSubtitles answered ${res.status}. Try again, or pick another`);
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length > FILE_MAX) fail(502, "That file is too big to be a subtitle. Pick another");
-      const text = buf.toString("utf8").replace(/^\uFEFF/, "");
-      if (!text.includes("-->")) fail(502, "That download isn't a subtitle file. Pick another");
-      fs.mkdirSync(FILES, { recursive: true });
-      fs.writeFileSync(fileOf(id), text);
+    if (!fetching.has(id)) fetching.set(id, download(id, f.url).finally(() => fetching.delete(id)));
+    await fetching.get(id);
+    // (looked at again: another request may have kept it meanwhile)
+    const list = store.titles[key] || [];
+    if (!list.some((y) => y.id === id)) {
+      const x = { id, lang: f.lang, language: f.language, name: f.name, release: f.release, at: Date.now(), by: String(by || "").slice(0, 64) };
+      store.titles[key] = list.concat(x);
+      if (store.dropped && store.dropped[key]) store.dropped[key] = store.dropped[key].filter((y) => y !== id);
+      prune();
+      save();
+      log(`subtitles: ${x.language} ${id} kept for ${key}${by ? ` (${by})` : ""}`);
     }
-    x = { id, lang: f.lang, language: f.language, name: f.name, release: f.release, at: Date.now(), by: String(by || "").slice(0, 64) };
-    store.titles[key] = list.concat(x);
-    prune();
-    save();
-    log(`subtitles: ${x.language} ${id} kept for ${key}${by ? ` (${by})` : ""}`);
   }
   const all = savedOf(key);
   return { saved: all, sub: all.find((y) => y.id === id) };
 }
+async function download(id, url) {
+  if (fs.existsSync(fileOf(id))) return;
+  let res;
+  try {
+    res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(30000) });
+  } catch {
+    fail(502, "Couldn't download it from OpenSubtitles. Try again, or pick another");
+  }
+  if (!res.ok) fail(502, `OpenSubtitles answered ${res.status}. Try again, or pick another`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > FILE_MAX) fail(502, "That file is too big to be a subtitle. Pick another");
+  const text = buf.toString("utf8").replace(/^\uFEFF/, "");
+  if (!text.includes("-->")) fail(502, "That download isn't a subtitle file. Pick another");
+  fs.mkdirSync(FILES, { recursive: true });
+  fs.writeFileSync(fileOf(id), text);
+}
 
-/** Forget a download for a title (its file goes when no title has it). */
+/** Forget a download for a title (its file goes when no title has it).
+ *  It's also never picked for the title by itself again (see auto). */
 export function drop(key, id) {
   if (!KEY.test(String(key)) || !ID.test(String(id))) fail(400, "Which subtitle?");
   load();
@@ -327,10 +340,43 @@ export function drop(key, id) {
   if (list.some((x) => x.id === id)) {
     const rest = list.filter((x) => x.id !== id);
     if (rest.length) store.titles[key] = rest; else delete store.titles[key];
+    store.dropped = store.dropped || {};
+    store.dropped[key] = [...new Set([...(store.dropped[key] || []), id])].slice(-50);
     save();
     if (!inUse(id)) fs.rm(fileOf(id), { force: true }, () => {});
   }
   return { saved: savedOf(key) };
+}
+
+/**
+ * Subtitles in a language, found by themselves (a TV that wants subtitles
+ * and has none in its language): one already kept for the title, else the
+ * best result in that language, downloaded and kept. { key, saved, sub | null }.
+ * q: as for search, and lang ("en", "pt-BR"). Several TVs asking at once
+ * (a custom channel's next episode) share one search and download.
+ */
+const picking = new Map(); // `${key}|${lang}` -> promise
+const baseLang = (l) => String(l || "").toLowerCase().split("-")[0];
+export async function auto(q, by) {
+  const want = baseLang(q.lang);
+  if (!/^[a-z]{2,3}$/.test(want)) fail(400, "Which language?");
+  const t = await titleOf(q);
+  const mine = () => savedOf(t.key).find((x) => baseLang(x.lang) === want) || null;
+  if (mine()) return { key: t.key, saved: savedOf(t.key), sub: mine() };
+  const k = `${t.key}|${want}`;
+  if (!picking.has(k)) {
+    picking.set(k, (async () => {
+      const r = await search(q);
+      if (mine()) return;
+      const dropped = new Set((load().dropped || {})[t.key] || []);
+      const best = r.results.filter((x) => baseLang(x.lang) === want && !dropped.has(x.id)).slice(0, 3);
+      for (const x of best) {
+        try { await keep(r.key, x.id, by ? `${by}, by itself` : "by itself"); return; } catch (e) { log(`subtitles: ${x.id} for ${r.key}: ${e.message}`); }
+      }
+    })().finally(() => picking.delete(k)));
+  }
+  await picking.get(k);
+  return { key: t.key, saved: savedOf(t.key), sub: mine() };
 }
 
 /** A kept subtitle file's text (SRT). */

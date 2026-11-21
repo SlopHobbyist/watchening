@@ -658,11 +658,11 @@
   };
   /** Play an On Demand title. `replace`: the same title again (another
    *  subtitle drawn in), keeping its place and the controls. */
-  App.playVod = function (ch, replace) {
+  App.playVod = function (ch, replace, keepCC) {
     if (!replace) endVod();
     S.vod = ch;
     endScrub(false);
-    Player.load(ch);
+    Player.load(ch, false, keepCC);
     Player.setOffset(0);
     Player.setScreen(screenFor(null));
     if (replace) return;
@@ -1080,13 +1080,20 @@
       const v = S.vod;
       if (v && v.burn) { OnDemand.chooseSub(null); return; } // subtitles drawn into the picture
       const label = Player.toggleCC();
+      // none to turn on: the best the server has, or found on OpenSubtitles (subsearch.js)
+      const found = label === null && SubSearch.current();
+      if (found) {
+        Player.ccWanted = true;
+        SubSearch.ensure(found, { say: true });
+        return;
+      }
       const file = v && (v.subs.find((x) => x.url && !x.dl) || SubSearch.mine(v.subs) || v.subs.find((x) => x.url));
       const chanFile = !v && Player.ch && Player.ch.custom ? Channels.subFile() : null;
       if (label === null && file) OnDemand.chooseSub(file);
       else if (label === null && chanFile) {
         Channels.showSub(chanFile).then(() => osd(`Subtitles: ${chanFile.label}`), (e) => osd(`Couldn't load the subtitles: ${e.message}`, 4000));
       }
-      else if (label === null) osd(SubSearch.current() ? "No subtitles in this video. Subtitle Options (Shift+C) can search for some." : "No subtitles in this stream. See Subtitles for more options.", 4000);
+      else if (label === null) osd("No subtitles in this stream. See Subtitles for more options.", 4000);
       else osd(label === "Off" ? "Subtitles Off" : `Subtitles: ${label}`);
       if (pbarShown()) renderPbar();
     },

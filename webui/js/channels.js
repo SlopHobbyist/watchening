@@ -276,12 +276,11 @@
   }
 
   /** Start what's on now again (the next episode, or the schedule moved),
-   *  keeping the subtitles as they were. */
-  let wantSubs = false;
+   *  keeping the subtitles as they were: on, they're on for it too (found
+   *  for it if need be, see subsDone below), YouTube's captions too. */
   function retune(ch) {
     const off = Player.ccOffset;
-    wantSubs = Player.cc === Player.EXT;
-    Player.load(ch);
+    Player.load(ch, false, true);
     Player.setOffset(off);
   }
 
@@ -383,12 +382,11 @@
       if (playing.mid && off > -8) ytLag = U.clamp(ytLag - off * 1000, 0, 6000);
       if (Math.abs(off) > 3) Player.jump(toMedia(d, ep, chanAt(playing, now)));
     }
+    // subtitles wanted (on for the episode before, or Subtitles When
+    // Available): the best there is, found on OpenSubtitles if need be
     if (!playing.subsDone) {
       playing.subsDone = true;
-      const sub = playing.subs.find((s) => s.url && s.selected) || playing.subs.find((s) => s.url && !s.dl) || SubSearch.mine(playing.subs) ||
-        (wantSubs && playing.subs.find((s) => s.url));
-      if (sub && (wantSubs || Store.cfg.prefs.ccDefault)) showSub(sub).catch(() => {});
-      wantSubs = false;
+      if (Player.ccWanted) SubSearch.ensure(current());
     }
   }, 1000);
 
